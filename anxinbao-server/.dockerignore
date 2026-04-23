@@ -1,0 +1,88 @@
+# ============================================================
+# 安心宝 Docker 构建排除列表
+# 减少构建上下文大小，加速构建，避免泄露敏感文件
+# ============================================================
+
+# === 版本控制 ===
+.git
+.gitignore
+
+# === Python 缓存和编译产物 ===
+__pycache__
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+*.egg-info
+dist
+build
+
+# === 环境和敏感配置 ===
+.env
+.env.*
+!.env.example
+
+# === 测试相关（生产镜像不需要） ===
+tests/
+test_*.py
+*_test.py
+conftest.py
+pytest.ini
+*.db
+
+# === IDE 和编辑器配置 ===
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# === Docker 相关（避免递归复制） ===
+Dockerfile
+docker-compose.yml
+docker-compose.yaml
+.dockerignore
+
+# === 文档和非运行时文件 ===
+*.md
+LICENSE
+docs/
+reports/
+
+# === 临时文件和日志 ===
+logs/
+*.log
+tmp/
+temp/
+
+# === 开发辅助脚本 ===
+fix_*.py
+start.bat
+
+# === 操作系统生成文件 ===
+.DS_Store
+Thumbs.db
+
+# === Node.js 前端（如有混合仓库） ===
+node_modules
+web-app/
+
+# === CI/CD 配置 ===
+.github/
+
+# === 数据库迁移版本（按需保留，此处排除以减小体积） ===
+# 如需在容器内运行 alembic upgrade，请注释下面这行
+# alembic/versions/
+
+# === SSL 证书（不应打入镜像，通过卷挂载） ===
+ssl/
+
+# === 上传文件目录（通过卷挂载） ===
+uploads/
+
+# === 备份文件 ===
+backups/

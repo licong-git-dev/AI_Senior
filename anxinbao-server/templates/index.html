@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安心宝 - 智能健康陪聊音箱演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #FFF8F0 0%, #FFE4CC 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            color: #FF8C42;
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .device-container {
+            background: #2C2C2C;
+            border-radius: 30px;
+            padding: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            width: 100%;
+        }
+
+        .device-screen {
+            background: #FFF8F0;
+            border-radius: 20px;
+            min-height: 500px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 待机界面 */
+        .standby-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 30px;
+        }
+
+        .standby-view.hidden {
+            display: none;
+        }
+
+        .time-display {
+            font-size: 72px;
+            font-weight: 300;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .date-display {
+            font-size: 18px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .lunar-display {
+            font-size: 14px;
+            color: #999;
+            margin-bottom: 30px;
+        }
+
+        .weather-display {
+            font-size: 20px;
+            color: #FF8C42;
+            margin-bottom: 40px;
+        }
+
+        .hint-text {
+            background: rgba(255, 140, 66, 0.1);
+            border: 2px dashed #FF8C42;
+            border-radius: 15px;
+            padding: 20px 40px;
+            color: #FF8C42;
+            font-size: 18px;
+            text-align: center;
+        }
+
+        /* 对话界面 */
+        .chat-view {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+        }
+
+        .chat-view.active {
+            display: flex;
+        }
+
+        .chat-header {
+            background: #FF8C42;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chat-header .back-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 5px 10px;
+        }
+
+        .chat-header .title {
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .chat-header .time {
+            font-size: 14px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        .message.user {
+            background: #E3F2FD;
+            color: #333;
+            align-self: flex-start;
+            border-bottom-left-radius: 5px;
+        }
+
+        .message.assistant {
+            background: #E8F5E9;
+            color: #333;
+            align-self: flex-end;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message .avatar {
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+
+        .chat-input {
+            background: #F5F5F5;
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+        }
+
+        .chat-input button {
+            background: #FF8C42;
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-size: 20px;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .chat-input button:hover {
+            transform: scale(1.05);
+        }
+
+        .chat-input button:active {
+            transform: scale(0.95);
+        }
+
+        /* 食疗建议卡片 */
+        .food-therapy-card {
+            background: white;
+            border-radius: 15px;
+            padding: 15px;
+            margin-top: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .food-therapy-card h4 {
+            color: #FF8C42;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+
+        .food-therapy-card .ingredients {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .food-therapy-card .steps {
+            color: #333;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .food-therapy-card .effect {
+            color: #4CAF50;
+            font-size: 13px;
+            font-style: italic;
+        }
+
+        /* 大按钮 */
+        .big-button {
+            background: #FF3B30;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 5px 20px rgba(255, 59, 48, 0.4);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .big-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(255, 59, 48, 0.5);
+        }
+
+        .big-button:active {
+            transform: scale(0.95);
+        }
+
+        .big-button span {
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        /* 风险提示 */
+        .risk-indicator {
+            display: none;
+            background: #FFF3E0;
+            border-left: 4px solid #FF9800;
+            padding: 10px 15px;
+            margin: 10px 20px;
+            border-radius: 5px;
+            font-size: 14px;
+            color: #E65100;
+        }
+
+        .risk-indicator.high {
+            background: #FFEBEE;
+            border-left-color: #F44336;
+            color: #C62828;
+        }
+
+        .risk-indicator.active {
+            display: block;
+        }
+
+        /* 子女端面板 */
+        .family-panel {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .family-panel h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .family-panel h3::before {
+            content: '📱';
+        }
+
+        .notification-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .notification-item {
+            background: #FFF8F0;
+            border-radius: 10px;
+            padding: 12px;
+            border-left: 4px solid #FF8C42;
+        }
+
+        .notification-item.urgent {
+            border-left-color: #F44336;
+            background: #FFEBEE;
+        }
+
+        .notification-item .time {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 5px;
+        }
+
+        .notification-item .content {
+            font-size: 14px;
+            color: #333;
+        }
+
+        .notification-item .score {
+            font-size: 12px;
+            color: #FF8C42;
+            margin-top: 5px;
+        }
+
+        .no-notification {
+            text-align: center;
+            color: #999;
+            padding: 20px;
+        }
+
+        /* 加载动画 */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #FF8C42;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 响应式 */
+        @media (max-width: 480px) {
+            .time-display {
+                font-size: 56px;
+            }
+
+            .device-container {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏠 安心宝</h1>
+        <p>智能健康陪聊音箱 · Web演示</p>
+    </div>
+
+    <div class="device-container">
+        <div class="device-screen">
+            <!-- 待机界面 -->
+            <div class="standby-view" id="standbyView">
+                <div class="time-display" id="timeDisplay">10:30</div>
+                <div class="date-display" id="dateDisplay">2025年12月24日 周二</div>
+                <div class="lunar-display" id="lunarDisplay">农历冬月廿四</div>
+                <div class="weather-display">☀️ 晴 3~12℃ 武汉</div>
+                <div class="hint-text">按下按钮，和我说话吧</div>
+            </div>
+
+            <!-- 对话界面 -->
+            <div class="chat-view" id="chatView">
+                <div class="chat-header">
+                    <button class="back-btn" onclick="showStandby()">← 返回</button>
+                    <span class="title">安心宝</span>
+                    <span class="time" id="chatTime">10:30</span>
+                </div>
+
+                <div class="risk-indicator" id="riskIndicator">
+                    ⚠️ 已通知您的家人关注
+                </div>
+
+                <div class="chat-messages" id="chatMessages">
+                    <!-- 消息会动态添加到这里 -->
+                </div>
+
+                <div class="loading" id="loading"></div>
+
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="输入消息..." onkeypress="handleKeyPress(event)">
+                    <button onclick="sendMessage()">➤</button>
+                </div>
+            </div>
+
+            <!-- 大按钮 -->
+            <div class="big-button" onclick="startChat()">
+                <span>按住说话</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 子女端面板 -->
+    <div class="family-panel">
+        <h3>子女端通知</h3>
+        <div class="notification-list" id="notificationList">
+            <div class="no-notification">暂无通知，一切正常 ✓</div>
+        </div>
+    </div>
+
+    <script>
+        // 状态
+        let sessionId = null;
+        const userId = 'demo_user_001';
+        let notifications = [];
+
+        // 更新时间显示
+        function updateTime() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            document.getElementById('timeDisplay').textContent = `${hours}:${minutes}`;
+            document.getElementById('chatTime').textContent = `${hours}:${minutes}`;
+
+            const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+            const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${weekDays[now.getDay()]}`;
+            document.getElementById('dateDisplay').textContent = dateStr;
+        }
+
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        // 显示待机界面
+        function showStandby() {
+            document.getElementById('standbyView').classList.remove('hidden');
+            document.getElementById('chatView').classList.remove('active');
+        }
+
+        // 开始对话
+        function startChat() {
+            document.getElementById('standbyView').classList.add('hidden');
+            document.getElementById('chatView').classList.add('active');
+            document.getElementById('messageInput').focus();
+        }
+
+        // 添加消息到界面
+        function addMessage(content, role, foodTherapy = null) {
+            const messagesContainer = document.getElementById('chatMessages');
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+
+            const avatar = role === 'user' ? '👴' : '🤖';
+            const avatarDiv = document.createElement('div');
+            avatarDiv.className = 'avatar';
+            avatarDiv.textContent = avatar;
+            messageDiv.appendChild(avatarDiv);
+            messageDiv.appendChild(document.createTextNode(content));
+
+            messagesContainer.appendChild(messageDiv);
+
+            // 如果有食疗建议
+            if (foodTherapy) {
+                const therapyDiv = document.createElement('div');
+                therapyDiv.className = 'food-therapy-card';
+                const h4 = document.createElement('h4');
+                h4.textContent = '🍵 ' + foodTherapy.name;
+                therapyDiv.appendChild(h4);
+
+                const ingredientsDiv = document.createElement('div');
+                ingredientsDiv.className = 'ingredients';
+                const ingredientsLabel = document.createElement('strong');
+                ingredientsLabel.textContent = '材料：';
+                ingredientsDiv.appendChild(ingredientsLabel);
+                ingredientsDiv.appendChild(document.createTextNode(
+                    Array.isArray(foodTherapy.ingredients) ? foodTherapy.ingredients.join('、') : foodTherapy.ingredients
+                ));
+                therapyDiv.appendChild(ingredientsDiv);
+
+                const stepsDiv = document.createElement('div');
+                stepsDiv.className = 'steps';
+                const stepsLabel = document.createElement('strong');
+                stepsLabel.textContent = '做法：';
+                stepsDiv.appendChild(stepsLabel);
+                stepsDiv.appendChild(document.createTextNode(foodTherapy.steps));
+                therapyDiv.appendChild(stepsDiv);
+
+                const effectDiv = document.createElement('div');
+                effectDiv.className = 'effect';
+                const effectLabel = document.createElement('strong');
+                effectLabel.textContent = '功效：';
+                effectDiv.appendChild(effectLabel);
+                effectDiv.appendChild(document.createTextNode(foodTherapy.effect));
+                therapyDiv.appendChild(effectDiv);
+                messagesContainer.appendChild(therapyDiv);
+            }
+
+            // 滚动到底部
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // 添加通知到子女端
+        function addNotification(riskInfo, message) {
+            if (!riskInfo.need_notify) return;
+
+            const notification = {
+                time: new Date().toLocaleTimeString(),
+                content: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+                score: riskInfo.risk_score,
+                reason: riskInfo.reason
+            };
+
+            notifications.unshift(notification);
+
+            const listContainer = document.getElementById('notificationList');
+            listContainer.innerHTML = '';
+            notifications.forEach(n => {
+                const item = document.createElement('div');
+                item.className = 'notification-item' + (n.score >= 8 ? ' urgent' : '');
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'time';
+                timeDiv.textContent = n.time;
+                item.appendChild(timeDiv);
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'content';
+                contentDiv.textContent = n.content;
+                item.appendChild(contentDiv);
+
+                const scoreDiv = document.createElement('div');
+                scoreDiv.className = 'score';
+                scoreDiv.textContent = '风险评分：' + n.score + '/10 · ' + n.reason;
+                item.appendChild(scoreDiv);
+
+                listContainer.appendChild(item);
+            });
+
+            // 显示风险提示
+            const indicator = document.getElementById('riskIndicator');
+            indicator.classList.add('active');
+            if (riskInfo.risk_score >= 8) {
+                indicator.classList.add('high');
+                indicator.textContent = '⚠️ 紧急：已通知您的家人！';
+            } else {
+                indicator.classList.remove('high');
+                indicator.textContent = '⚠️ 已通知您的家人关注';
+            }
+        }
+
+        // 发送消息
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // 清空输入框
+            input.value = '';
+
+            // 显示用户消息
+            addMessage(message, 'user');
+
+            // 显示加载
+            document.getElementById('loading').classList.add('active');
+
+            try {
+                const response = await fetch('/api/chat/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        message: message,
+                        session_id: sessionId,
+                        dialect: 'mandarin'
+                    })
+                });
+
+                const data = await response.json();
+
+                // 更新会话ID
+                sessionId = data.session_id;
+
+                // 隐藏加载
+                document.getElementById('loading').classList.remove('active');
+
+                // 显示AI回复
+                addMessage(data.reply, 'assistant', data.food_therapy);
+
+                // 处理风险通知
+                if (data.risk_info) {
+                    addNotification(data.risk_info, message);
+                }
+
+            } catch (error) {
+                console.error('发送失败:', error);
+                document.getElementById('loading').classList.remove('active');
+                addMessage('抱歉，我刚才没听清，您再说一遍？', 'assistant');
+            }
+        }
+
+        // 回车发送
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // 预设一些示例消息按钮
+        const examples = [
+            '我今天头有点晕',
+            '胸口有点闷',
+            '最近睡不好觉',
+            '今天武汉天气怎么样',
+            '给我讲个故事'
+        ];
+    </script>
+</body>
+</html>

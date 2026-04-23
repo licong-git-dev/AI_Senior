@@ -1,0 +1,195 @@
+# ============================================================
+# 安心宝云端服务 Docker Compose 配置
+# 服务：后端 API、PostgreSQL 数据库、Redis 缓存、Nginx 反向代理
+# ============================================================
+# 用法：
+#   开发环境：docker compose up -d
+#   生产环境：docker compose --profile production up -d
+# ============================================================
+
+services:
+  # ============ 后端 API 服务 ============
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: anxinbao-api
+    restart: unless-stopped
+    # 从 .env 文件加载环境变量（避免在 compose 文件中硬编码）
+    env_file:
+      - .env
+    environment:
+      # 覆盖 .env 中的数据库和缓存连接地址，指向容器内部网络
+      - DATABASE_URL=postgresql://anxinbao:${DB_PASSWORD:-anxinbao123}@db:5432/anxinbao
+      - REDIS_URL=redis://redis:6379/0
+      - HOST=0.0.0.0
+      - PORT=8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # 持久化日志、静态文件和上传目录（使用绑定挂载方便开发调试）
+      - ./logs:/app/logs
+      - ./static:/app/static
+      - ./uploads:/app/uploads
+    networks:
+      - anxinbao-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    # 资源限制，防止单个容器耗尽宿主机资源
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+        reservations:
+          memory: 256M
+          cpus: "0.5"
+    # 日志配置：限制单文件大小和保留数量，避免磁盘被日志撑满
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============ PostgreSQL 数据库 ============
+  db:
+    image: postgres:16-alpine
+    container_name: anxinbao-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: anxinbao
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-anxinbao123}
+      POSTGRES_DB: anxinbao
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # 设置中文 locale（适配中文全文搜索）
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8"
+    volumes:
+      # 数据持久化到命名卷
+      - postgres_data:/var/lib/postgresql/data
+      # 初始化脚本（仅首次创建数据库时执行）
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      # 默认不暴露到宿主机；开发时可设置 DB_PORT 来暴露
+      - "${DB_PORT:-5432}:5432"
+    networks:
+      - anxinbao-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anxinbao -d anxinbao"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "30m"
+        max-file: "3"
+
+  # ============ Redis 缓存 ============
+  redis:
+    image: redis:7-alpine
+    container_name: anxinbao-redis
+    restart: unless-stopped
+    # Redis 配置：
+    # - appendonly: 开启 AOF 持久化，防止重启丢数据
+    # - maxmemory: 限制最大内存使用
+    # - maxmemory-policy: 内存满时淘汰最近最少使用的 key
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --tcp-backlog 128
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - anxinbao-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.5"
+        reservations:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============ Nginx 反向代理（仅生产环境） ============
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: anxinbao-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./static:/var/www/static:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - anxinbao-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "30m"
+        max-file: "5"
+    # 仅在 --profile production 时启动
+    profiles:
+      - production
+
+# ============ 网络配置 ============
+networks:
+  anxinbao-network:
+    driver: bridge
+    # 自定义子网，避免与宿主机网段冲突
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ============ 持久化数据卷 ============
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

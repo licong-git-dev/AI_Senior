@@ -1,0 +1,88 @@
+# ===== 敏感配置（严禁提交） =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+venv/
+env/
+ENV/
+.venv/
+
+# ===== 数据库与本地数据 =====
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+anxinbao-server/anxinbao.db
+anxinbao-server/test_anxinbao.db
+anxinbao-server/*.db
+
+# ===== 上传文件与运行时数据 =====
+uploads/
+anxinbao-server/uploads/
+anxinbao-pwa/uploads/
+logs/
+*.log
+
+# ===== Node.js / 前端 =====
+node_modules/
+.npm
+.pnpm-store/
+.yarn/
+.yarn-integrity
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# ===== 编辑器与 IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===== Claude Code / OMC 工具状态 =====
+.claude/
+.omc/
+.specstory/
+.cursorindexingignore
+
+# ===== 报告与临时输出 =====
+reports/
+*.bak
+*.tmp
+*.orig
+
+# ===== TypeScript =====
+*.tsbuildinfo
+
+# ===== 一次性修复脚本（保留可选） =====
+# 如不希望提交修复历史脚本，取消下行注释
+# anxinbao-server/fix_*.py

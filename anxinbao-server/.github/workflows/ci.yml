@@ -1,0 +1,57 @@
+# 安心宝后端 CI 工作流
+# 用于代码质量检查、测试和覆盖率报告
+
+name: 安心宝后端 CI
+
+# 触发条件：push 到 main/develop 分支，以及所有 PR
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+# CI 环境变量（测试专用，非生产密钥）
+env:
+  DEBUG: "true"
+  DATABASE_URL: "sqlite://"
+  JWT_SECRET_KEY: "test-secret-key-for-ci-testing-only-32chars!"
+  DASHSCOPE_API_KEY: "test-api-key"
+  REDIS_URL: ""
+
+jobs:
+  ci:
+    name: 代码检查与测试
+    runs-on: ubuntu-latest
+
+    steps:
+      # 检出代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 设置 Python 3.12 环境
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # 安装项目依赖
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8
+
+      # 代码风格检查（仅检查严重错误）
+      - name: 代码风格检查（flake8）
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      # 运行测试套件
+      - name: 运行测试
+        run: |
+          pytest tests/ -q --tb=short
+
+      # 生成测试覆盖率报告
+      - name: 生成覆盖率报告
+        run: |
+          pytest --cov=app --cov-report=xml

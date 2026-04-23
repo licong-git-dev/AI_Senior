@@ -1,0 +1,22 @@
+CREATE TABLE care_plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    plan_name VARCHAR(100) NOT NULL,
+    plan_type INTEGER NOT NULL,
+    description TEXT,
+    goals JSONB DEFAULT '[]'::jsonb,
+    interventions JSONB DEFAULT '[]'::jsonb,
+    schedule JSONB DEFAULT '{}'::jsonb,
+    monitoring_params JSONB DEFAULT '{}'::jsonb,
+    responsible_caregiver_id UUID,
+    start_date DATE NOT NULL,
+    end_date DATE,
+    status INTEGER DEFAULT 1,
+    review_frequency_days INTEGER DEFAULT 30,
+    last_review_date DATE,
+    next_review_date DATE,
+    risk_level INTEGER DEFAULT 1,
+    created_by UUID,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

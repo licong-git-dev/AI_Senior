@@ -1,0 +1,21 @@
+CREATE TABLE emergency_calls (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    device_id UUID,
+    call_type VARCHAR(50) NOT NULL,
+    trigger_source VARCHAR(50) DEFAULT 'manual',
+    severity_level INTEGER DEFAULT 1,
+    location_latitude DECIMAL(10,8),
+    location_longitude DECIMAL(11,8),
+    location_address TEXT,
+    call_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    response_status INTEGER DEFAULT 1,
+    responder_id UUID,
+    response_time TIMESTAMP WITH TIME ZONE,
+    arrival_time TIMESTAMP WITH TIME ZONE,
+    completion_time TIMESTAMP WITH TIME ZONE,
+    response_notes TEXT,
+    health_data_snapshot JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

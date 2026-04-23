@@ -1,0 +1,60 @@
+{
+  "name": "智能养老助手",
+  "short_name": "养老助手",
+  "description": "智能养老平台移动端应用 - 健康监测、紧急求助、AI分析",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4F46E5",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot1.png",
+      "sizes": "540x720",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ],
+  "categories": ["health", "lifestyle", "medical"],
+  "shortcuts": [
+    {
+      "name": "紧急求助",
+      "short_name": "求助",
+      "description": "一键紧急求助",
+      "url": "/emergency",
+      "icons": [
+        {
+          "src": "/emergency-icon.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "健康监测",
+      "short_name": "监测",
+      "url": "/monitor",
+      "icons": [
+        {
+          "src": "/monitor-icon.png",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}

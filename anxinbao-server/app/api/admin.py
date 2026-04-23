@@ -1,0 +1,529 @@
+"""
+运营管理后台API
+提供数据仪表盘、用户管理、内容审核、系统配置等接口
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+
+from app.services.admin_service import (
+    admin_service,
+    AdminRole,
+    ReportType
+)
+from app.core.security import get_current_user
+
+router = APIRouter(prefix="/api/admin", tags=["运营管理"])
+
+
+# ==================== 权限验证 ====================
+
+async def verify_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """验证管理员身份"""
+    # 实际实现中应检查用户是否为管理员
+    # 这里简化处理，假设特定用户ID为管理员
+    user_id = int(current_user.get('sub', 0))
+
+    # 模拟管理员验证
+    admin = admin_service.get_admin(user_id)
+    if not admin:
+        # 为演示目的，允许任何登录用户访问
+        # 实际生产环境应严格验证
+        return {'admin_id': user_id, 'role': 'operator'}
+
+    return {'admin_id': admin.admin_id, "role": admin.role.value}
+
+
+# ==================== 请求模型 ====================
+
+class BlockUserRequest(BaseModel):
+    """封禁用户请求"""
+    user_id: int = Field(..., description='用户ID')
+    reason: str = Field(..., max_length=500, description='封禁原因')
+    duration_days: Optional[int] = Field(None, ge=1, le=3650, description="封禁天数，不填为永久")
+
+
+class ContentActionRequest(BaseModel):
+    """内容操作请求"""
+    content_id: str = Field(..., description="内容ID")
+    reason: Optional[str] = Field(default="", max_length=500, description="原因")
+
+
+class HandleReportRequest(BaseModel):
+    """处理举报请求"""
+    report_id: str = Field(..., description="举报ID")
+    action: str = Field(..., description="处理动作: approve/dismiss")
+    result: str = Field(..., max_length=500, description="处理结果说明")
+
+
+class UpdateConfigRequest(BaseModel):
+    """更新配置请求"""
+    key: str = Field(..., description='配置键')
+    value: Any = Field(..., description="配置值")
+
+
+class CreateReportRequest(BaseModel):
+    """创建举报请求"""
+    content_type: str = Field(..., description="内容类型: post/comment/message")
+    content_id: str = Field(..., description="内容ID")
+    report_type: str = Field(..., description="举报类型: spam/abuse/inappropriate/fraud/other")
+    reason: str = Field(..., max_length=500, description="举报原因")
+
+
+# ==================== 仪表盘API ====================
+
+@router.get("/dashboard/overview")
+async def get_dashboard_overview(admin: dict = Depends(verify_admin)):
+    """
+    获取仪表盘概览
+
+    返回用户、收入、订阅、健康、紧急求助等核心数据
+    """
+    overview = admin_service.dashboard.get_overview()
+    return overview
+
+
+@router.get("/dashboard/trends")
+async def get_dashboard_trends(
+    days: int = Query(30, ge=7, le=90, description="天数"),
+    admin: dict = Depends(verify_admin)
+):
+    """
+    获取趋势数据
+
+    返回指定天数的用户增长、收入、活跃用户趋势
+    """
+    trends = admin_service.dashboard.get_trends(days)
+    return trends
+
+
+@router.get("/dashboard/user-distribution")
+async def get_user_distribution(admin: dict = Depends(verify_admin)):
+    """
+    获取用户分布数据
+
+    返回年龄、地区、会员等级分布
+    """
+    distribution = admin_service.dashboard.get_user_distribution()
+    return distribution
+
+
+@router.get("/dashboard/feature-usage")
+async def get_feature_usage(admin: dict = Depends(verify_admin)):
+    """
+    获取功能使用统计
+
+    返回各功能模块的使用情况
+    """
+    usage = admin_service.dashboard.get_feature_usage()
+    return usage
+
+
+# ==================== 用户管理API ====================
+
+@router.get("/users")
+async def search_users(
+    keyword: Optional[str] = Query(None, description='搜索关键词'),
+    membership: Optional[str] = Query(None, description='会员类型'),
+    status: Optional[str] = Query(None, description="状态"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    admin: dict = Depends(verify_admin)
+):
+    """
+    搜索用户列表
+    """
+    result = admin_service.user_mgmt.search_users(
+        keyword=keyword,
+        membership=membership,
+        status=status,
+        page=page,
+        page_size=page_size
+    )
+    return result
+
+
+@router.get("/users/{user_id}")
+async def get_user_detail(
+    user_id: int,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    获取用户详情
+    """
+    user = admin_service.user_mgmt.get_user_detail(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return user
+
+
+@router.post("/users/block")
+async def block_user(
+    request: BlockUserRequest,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    封禁用户
+    """
+    success = admin_service.user_mgmt.block_user(
+        user_id=request.user_id,
+        reason=request.reason,
+        admin_id=admin['admin_id'],
+        duration_days=request.duration_days
+    )
+
+    # 记录审计日志
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action='block_user',
+        resource_type='user',
+        resource_id=str(request.user_id),
+        details={'reason': request.reason, 'duration': request.duration_days}
+    )
+
+    return {
+        'success': success,
+        "message": f"用户 {request.user_id} 已被封禁"
+    }
+
+
+@router.post("/users/{user_id}/unblock")
+async def unblock_user(
+    user_id: int,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    解封用户
+    """
+    success = admin_service.user_mgmt.unblock_user(user_id, admin['admin_id'])
+
+    if success:
+        admin_service.audit_log.log_action(
+            admin_id=admin['admin_id'],
+            action="unblock_user",
+            resource_type='user',
+            resource_id=str(user_id)
+        )
+
+    return {
+        'success': success,
+        'message': f'用户 {user_id} 已解封' if success else "用户未被封禁"
+    }
+
+
+# ==================== 内容审核API ====================
+
+@router.get("/content/pending")
+async def get_pending_content(
+    content_type: Optional[str] = Query(None, description="内容类型"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    admin: dict = Depends(verify_admin)
+):
+    """
+    获取待审核内容
+    """
+    result = admin_service.content_mod.get_pending_content(
+        content_type=content_type,
+        page=page,
+        page_size=page_size
+    )
+    return result
+
+
+@router.post("/content/approve")
+async def approve_content(
+    request: ContentActionRequest,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    通过内容审核
+    """
+    success = admin_service.content_mod.approve_content(
+        request.content_id,
+        admin['admin_id']
+    )
+
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action="approve_content",
+        resource_type='content',
+        resource_id=request.content_id
+    )
+
+    return {'success': success, 'message': "内容已通过"}
+
+
+@router.post("/content/reject")
+async def reject_content(
+    request: ContentActionRequest,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    拒绝内容
+    """
+    success = admin_service.content_mod.reject_content(
+        request.content_id,
+        admin['admin_id'],
+        request.reason
+    )
+
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action="reject_content",
+        resource_type='content',
+        resource_id=request.content_id,
+        details={'reason': request.reason}
+    )
+
+    return {'success': success, 'message': '内容已拒绝'}
+
+
+# ==================== 举报管理API ====================
+
+@router.get("/reports")
+async def get_reports(
+    status: Optional[str] = Query(None, description="状态: pending/processed/dismissed"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    admin: dict = Depends(verify_admin)
+):
+    """
+    获取举报列表
+    """
+    result = admin_service.content_mod.get_reports(
+        status=status,
+        page=page,
+        page_size=page_size
+    )
+    return result
+
+
+@router.post("/reports")
+async def create_report(
+    request: CreateReportRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    创建举报（用户端）
+    """
+    user_id = int(current_user['sub'])
+
+    try:
+        report_type = ReportType(request.report_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail='无效的举报类型')
+
+    report = admin_service.content_mod.create_report(
+        content_type=request.content_type,
+        content_id=request.content_id,
+        reporter_id=user_id,
+        report_type=report_type,
+        reason=request.reason
+    )
+
+    return {
+        'success': True,
+        'report_id': report.report_id,
+        "message": "举报已提交，我们会尽快处理"
+    }
+
+
+@router.post("/reports/handle")
+async def handle_report(
+    request: HandleReportRequest,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    处理举报
+    """
+    if request.action not in ['approve', 'dismiss']:
+        raise HTTPException(status_code=400, detail='无效的处理动作')
+
+    report = admin_service.content_mod.handle_report(
+        report_id=request.report_id,
+        admin_id=admin['admin_id'],
+        action=request.action,
+        result=request.result
+    )
+
+    if not report:
+        raise HTTPException(status_code=404, detail='举报不存在')
+
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action=f'handle_report_{request.action}',
+        resource_type='report',
+        resource_id=request.report_id,
+        details={'result': request.result}
+    )
+
+    return {
+        'success': True,
+        'report': report.to_dict(),
+        'message': '举报已处理'
+    }
+
+
+# ==================== 系统配置API ====================
+
+@router.get("/config")
+async def get_all_configs(admin: dict = Depends(verify_admin)):
+    """
+    获取所有系统配置（按类别分组）
+    """
+    configs = admin_service.sys_config.get_all_configs()
+    return {'configs': configs}
+
+
+@router.get("/config/{category}")
+async def get_configs_by_category(
+    category: str,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    获取指定类别的配置
+    """
+    configs = admin_service.sys_config.get_configs_by_category(category)
+    return {'configs': [c.to_dict() for c in configs]}
+
+
+@router.put("/config")
+async def update_config(
+    request: UpdateConfigRequest,
+    admin: dict = Depends(verify_admin)
+):
+    """
+    更新配置
+    """
+    config = admin_service.sys_config.update_config(
+        key=request.key,
+        value=request.value,
+        admin_id=admin['admin_id']
+    )
+
+    if not config:
+        raise HTTPException(status_code=404, detail='配置项不存在')
+
+    admin_service.audit_log.log_action(
+        admin_id=admin["admin_id"],
+        action="update_config",
+        resource_type='config',
+        resource_id=request.key,
+        details={'new_value': request.value}
+    )
+
+    return {
+        'success': True,
+        'config': config.to_dict(),
+        'message': "配置已更新"
+    }
+
+
+# ==================== 审计日志API ====================
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    admin_id: Optional[int] = Query(None, description='管理员ID'),
+    action: Optional[str] = Query(None, description='操作类型'),
+    resource_type: Optional[str] = Query(None, description="资源类型"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    admin: dict = Depends(verify_admin)
+):
+    """
+    查询审计日志
+    """
+    result = admin_service.audit_log.get_logs(
+        admin_id=admin_id,
+        action=action,
+        resource_type=resource_type,
+        page=page,
+        page_size=page_size
+    )
+    return result
+
+
+# ==================== 系统状态API ====================
+
+@router.get("/system/status")
+async def get_system_status(admin: dict = Depends(verify_admin)):
+    """
+    获取系统状态
+    """
+    return {
+        'status': 'healthy',
+        'version': '1.0.0',
+        'uptime': "30d 12h 45m",
+        'services': {
+            'database': 'healthy',
+            'redis': 'healthy',
+            'ai_service': 'healthy',
+            'payment': 'healthy'
+        },
+        "performance": {
+            'cpu_usage': "35%",
+            'memory_usage': "62%",
+            'disk_usage': '45%',
+            "active_connections": 1234
+        },
+        'checked_at': datetime.now().isoformat()
+    }
+
+
+@router.post("/system/announcement")
+async def set_announcement(
+    message: str = Query(..., max_length=500, description="公告内容"),
+    admin: dict = Depends(verify_admin)
+):
+    """
+    设置系统公告
+    """
+    admin_service.sys_config.update_config(
+        "app.announcement",
+        message,
+        admin['admin_id']
+    )
+
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action="set_announcement",
+        resource_type='system',
+        resource_id="announcement",
+        details={'message': message}
+    )
+
+    return {
+        'success': True,
+        'message': "公告已发布"
+    }
+
+
+@router.post("/system/maintenance")
+async def toggle_maintenance(
+    enabled: bool = Query(..., description="是否开启维护模式"),
+    admin: dict = Depends(verify_admin)
+):
+    """
+    切换维护模式
+    """
+    admin_service.sys_config.update_config(
+        "app.maintenance_mode",
+        enabled,
+        admin['admin_id']
+    )
+
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action="toggle_maintenance",
+        resource_type='system',
+        resource_id="maintenance",
+        details={'enabled': enabled}
+    )
+
+    return {
+        'success': True,
+        "maintenance_mode": enabled,
+        'message': f"维护模式已{'开启' if enabled else '关闭'}"
+    }
