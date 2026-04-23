@@ -16,6 +16,21 @@
 | 启动安全门 | ❌ 无 | ✅ 强校验 | [main.py](anxinbao-server/main.py) `_enforce_production_secrets`：JWT/ENCRYPTION 缺失则拒绝启动 |
 | CI 守卫 | ❌ 无 | 📋 模板就绪待启用 | [anxinbao-server/docs/ci/integration-self-check.yml](anxinbao-server/docs/ci/integration-self-check.yml) 同时验证"缺凭据应被拦"和"齐凭据应通过"。需要 PAT `workflow` scope 才能 push 到 `.github/workflows/`，启用步骤见 [docs/ci/README.md](anxinbao-server/docs/ci/README.md) |
 
+## v3 增量（第四 + 第五轮）
+
+| 模块 | v2 | v3 | 变化原因 |
+|---|---|---|---|
+| API `life` (天气) | 🔴 random | 🟡 生产 501 | [life_service.py](anxinbao-server/app/services/life_service.py) 抛 `LifeServiceNotImplemented`，[life.py](anxinbao-server/app/api/life.py) `_life_route` 装饰器翻译为 HTTP 501 + fallback 建议 |
+| API `admin` 鉴权 | ⚠️ 任意登录用户可访问 | ✅ 强校验 admin 角色 | [admin.py](anxinbao-server/app/api/admin.py) 修历史"演示目的"提权漏洞 |
+| Service `integration_service` | 🔴 4 random（伪医疗记录/设备读数） | 🟡 生产 NotImplemented | [integration_service.py](anxinbao-server/app/services/integration_service.py) `_enforce_real_integration` 守卫 |
+| Service `ai_service` | 🔴 假信心值 | 🟡 _SafeRandom 门控 | [ai_service.py](anxinbao-server/app/services/ai_service.py) 推荐评分/语音情感置信度生产清零，真业务逻辑（按 pitch/energy 阈值判定情绪）保留 |
+| Service `voice_feedback_service` | 🔴 7 random | 🟢 重新分类 | 经核实 random 都是 `template_pool` 的合法抽取（与 dialect_companion 同模式），并非伪造业务数据；澄清归类 |
+| 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
+| 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
+
+**v3 后剩余红色就绪度模块：0 个**（v1 起 10 → v2 4 → v3 0）。
+所有曾标红的模块要么真正修好（user.py / admin 鉴权），要么生产环境抛 501（life / integration），要么 _SafeRandom 门控（admin / analytics / ai service）。**整体上线前 P0 = 配齐凭据 + 启用 CI 守卫**，剩下都是 P1 业务深度问题。
+
 ## 一、为什么需要这份文档
 
 历史问题：

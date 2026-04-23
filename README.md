@@ -219,6 +219,28 @@ UserAuth.family_id → FamilyMember.id    # 家庭成员关系
 
 ---
 
+## 一键自检（开发常用）
+
+仓库根有 [Makefile](Makefile)，一行命令完成"集成 + 测试"自检，杜绝"伪 ✅ 上线"：
+
+```bash
+make verify        # 集成真实性 + 跑后端测试（开发模式）
+make verify-prod   # 模拟生产环境（DEBUG=false）验证守卫真生效
+make integrations  # 仅看每个第三方集成是 real / placeholder / missing
+make doctor        # 综合诊断：Python/Node/Git/.env/集成
+make help          # 查看所有命令
+```
+
+**第三方集成自检**还可单独跑（不启动 FastAPI，对低内存机器友好）：
+
+```bash
+cd anxinbao-server
+python scripts/check_integrations.py            # 可读表格
+python scripts/check_integrations.py --strict   # 缺凭据时退出码非 0（CI 用）
+```
+
+---
+
 ## 测试与质量
 
 ```bash
@@ -277,13 +299,28 @@ docker-compose --profile production up -d
 
 | 路径 | 说明 |
 |---|---|
-| `/docs` | Swagger UI 交互式文档 |
+| `/docs` | Swagger UI 交互式文档（生产模式自动隐藏红色就绪度模块）|
 | `/redoc` | ReDoc 文档 |
 | `/health` | 简单健康检查 |
 | `/health/live` | Kubernetes Liveness Probe |
 | `/health/ready` | Kubernetes Readiness Probe |
 | `/health/detailed` | 数据库 / Redis / 调度器详细状态 |
+| `/health/integrations` | **第三方集成真实性自检**（real/placeholder/missing/weak）|
 | `/metrics` | Prometheus 指标（请求量、延迟、AI 调用、消息数等） |
+
+---
+
+## 关键运维与开发文档
+
+| 文档 | 用途 |
+|---|---|
+| [FEATURE_STATUS.md](FEATURE_STATUS.md) | **功能就绪度三色灯**（🟢/🟡/🔴），对外宣传只能引用绿色项 |
+| [anxinbao-server/docs/VIDEO_CALL_SETUP.md](anxinbao-server/docs/VIDEO_CALL_SETUP.md) | TURN 中继部署指南（自建 coturn / 云 RTC / 免费 TURN 三方案） |
+| [anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md) | 90 分钟跑通支付宝沙箱 → 切生产的分步指南 |
+| [anxinbao-server/docs/MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md) | 已废弃 `/api/users/*` 端点的 1:1 迁移代码（前端 + 测试） |
+| [anxinbao-server/docs/ci/README.md](anxinbao-server/docs/ci/README.md) | GitHub Actions 守卫工作流模板与启用步骤 |
+| [anxinbao-server/DEPLOYMENT.md](anxinbao-server/DEPLOYMENT.md) | Docker / 生产部署完整步骤 |
+| [Execute_Plan/](Execute_Plan/) | 5 阶段交付方案：部署 / 推广 / 运维 / 时间线 |
 
 ---
 

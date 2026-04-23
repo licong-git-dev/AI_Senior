@@ -1,6 +1,10 @@
 """
 第三方集成服务
 提供医疗机构对接、智能硬件SDK、社区服务、保险理赔等接口
+
+⚠️ 状态：本模块的 sync_medical_records / 设备读数 等核心方法**仅有 mock 实现**
+   （生成假的医疗记录与传感器读数）。生产环境（DEBUG=False）应当抛
+   IntegrationNotImplemented 而不是返回伪数据，以免被误判为已对接。
 """
 import logging
 import secrets
@@ -11,6 +15,22 @@ from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
+
+
+class IntegrationNotImplemented(NotImplementedError):
+    """
+    标记：第三方集成（医疗机构 / IoT 设备 / 保险理赔）尚未对接真实供应商。
+    生产环境抛出；DEBUG=True 时可继续返回 mock 数据用于前端 UI 调试。
+    """
+
+
+def _enforce_real_integration(name: str) -> None:
+    from app.core.config import get_settings
+    if not get_settings().debug:
+        raise IntegrationNotImplemented(
+            f"integration_service.{name} 仅有 mock 实现，未对接真实第三方供应商。"
+            f" 在生产环境拒绝返回伪数据；请接入真实接口（如医联体接口、IoT 网关）后启用。"
+        )
 
 
 # ==================== 医疗机构对接 ====================
@@ -139,8 +159,9 @@ class MedicalIntegrationService:
         institution_id: str,
         auth_token: str
     ) -> List[MedicalRecord]:
-        """同步医疗记录"""
-        # 模拟从医疗机构API获取数据
+        """同步医疗记录（mock；生产环境抛 IntegrationNotImplemented）"""
+        _enforce_real_integration("MedicalInstitutionAdapter.sync_medical_records")
+        # 模拟从医疗机构API获取数据（仅 DEBUG 模式可达）
         import random
 
         records = []
@@ -379,6 +400,9 @@ class HardwareSDKService:
                 'kg'
             )
         }
+
+        # 设备读数也是 mock —— 真实接入应当由设备 SDK / MQTT 推送
+        _enforce_real_integration("HardwareSDK.simulate_reading")
 
         config = reading_configs.get(device.device_type)
         if config:

@@ -344,6 +344,17 @@ export default function ChildDashboard({
           <button
             onClick={() => {
               if (!parentUserId) return;
+              // 进入前预提醒：未配置 TURN 时通话在国内 70% NAT 场景会失败
+              // （详见 anxinbao-server/docs/VIDEO_CALL_SETUP.md）
+              if (!import.meta.env.VITE_TURN_URL) {
+                const ok = window.confirm(
+                  '提醒：当前服务器未配置 TURN 中继。\n\n'
+                  + '在部分家庭网络下视频可能连不上。\n'
+                  + '建议先用电话联系，或联系管理员配置 TURN。\n\n'
+                  + '仍要尝试视频通话吗？'
+                );
+                if (!ok) return;
+              }
               onStartVideoCall?.(parentUserId, parentName);
             }}
             className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"

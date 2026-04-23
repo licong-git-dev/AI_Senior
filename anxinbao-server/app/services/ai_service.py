@@ -1,9 +1,15 @@
 """
 高级AI功能服务
 提供智能健康预警、个性化推荐、情感分析、语音情绪识别、认知评估等功能
+
+⚠️ 历史问题：本模块对推荐评分（_recommend_music/news 的 score）和语音情感
+   识别的 confidence 用 random.uniform 生成假数字。真业务逻辑（推荐选品、
+   按 pitch/energy 阈值判定情绪）是真实的，但分数/置信度是伪造的，会让
+   下游运营判断错误。生产环境用 _SafeRandom 把这些"装饰性数值"清零，前端
+   能看到诚实的"无置信度"而非虚假数字。
 """
 import logging
-import random
+import random as _real_random
 from typing import Optional, Dict, List, Any, Tuple
 from enum import Enum
 from dataclasses import dataclass, field
@@ -11,6 +17,29 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+
+class _SafeRandom:
+    """
+    生产环境（DEBUG=False）的随机数守卫。
+    覆盖 random.uniform/randint（用于伪造置信度的场景）；保留 random.choice
+    （用于从模板池真实选择，是合法用法）。
+    """
+
+    def randint(self, a: int, b: int) -> int:
+        from app.core.config import get_settings
+        return _real_random.randint(a, b) if get_settings().debug else 0
+
+    def uniform(self, a: float, b: float) -> float:
+        from app.core.config import get_settings
+        return _real_random.uniform(a, b) if get_settings().debug else 0.0
+
+    def choice(self, seq):
+        # choice 是合法用法（从模板池抽取），不需要降级
+        return _real_random.choice(seq) if seq else None
+
+
+random = _SafeRandom()
 
 
 # ==================== 健康预警系统 ====================
