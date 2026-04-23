@@ -16,6 +16,8 @@ import {
   Copy,
   CheckCircle2,
   Link2,
+  MessageCircle,
+  Bookmark,
 } from 'lucide-react';
 import {
   getHealthSummary,
@@ -122,6 +124,74 @@ export default function ChildDashboard({
     const interval = setInterval(fetchData, 300000);
     return () => clearInterval(interval);
   }, [parentUserId]);
+
+  // 关怀建议 → 一键行动入口
+  // 设计目标：把"信息看板"改成"行动入口"。每条 tip 根据关键词推断
+  // 最有用的下一步动作（视频/发祝福/设提醒/查趋势/记下），让子女
+  // 看到 → 行动 → 焦虑被释放，而不是看完即关。
+  const inferTipAction = (tip: string): {
+    label: string;
+    icon: typeof Phone;
+    color: string;
+    onClick: () => void;
+  } => {
+    if (/视频|通话|连线|见面|聊聊/.test(tip)) {
+      return {
+        label: '立即视频',
+        icon: Video,
+        color: 'bg-indigo-500 hover:bg-indigo-600',
+        onClick: () => parentUserId && onStartVideoCall?.(parentUserId, parentName),
+      };
+    }
+    if (/电话|打个/.test(tip)) {
+      return {
+        label: '马上去电',
+        icon: Phone,
+        color: 'bg-emerald-500 hover:bg-emerald-600',
+        onClick: () => parentUserId && onStartVideoCall?.(parentUserId, parentName),
+      };
+    }
+    if (/提醒|服药|吃药|药|按时/.test(tip)) {
+      return {
+        label: '设个提醒',
+        icon: Bell,
+        color: 'bg-amber-500 hover:bg-amber-600',
+        onClick: () => onNavigate?.('notifications'),
+      };
+    }
+    if (/祝福|问候|关心|陪|聊|说说|告诉/.test(tip)) {
+      return {
+        label: '发条祝福',
+        icon: MessageCircle,
+        color: 'bg-pink-500 hover:bg-pink-600',
+        onClick: () => onNavigate?.('chat'),
+      };
+    }
+    if (/血压|心率|血糖|健康|趋势|检查|睡眠|运动/.test(tip)) {
+      return {
+        label: '查健康趋势',
+        icon: TrendingUp,
+        color: 'bg-green-500 hover:bg-green-600',
+        onClick: () => onNavigate?.('trends'),
+      };
+    }
+    // 默认：可记下，避免有用的建议被遗忘
+    return {
+      label: '记下',
+      icon: Bookmark,
+      color: 'bg-gray-500 hover:bg-gray-600',
+      onClick: () => {
+        try {
+          const noted = JSON.parse(localStorage.getItem('noted_tips') || '[]') as Array<{ tip: string; ts: number }>;
+          noted.unshift({ tip, ts: Date.now() });
+          localStorage.setItem('noted_tips', JSON.stringify(noted.slice(0, 50)));
+        } catch (_) { /* 容忍存储失败 */ }
+        if (typeof window !== 'undefined') {
+          window.alert('已记下此建议（最近 50 条）');
+        }
+      },
+    };
+  };
 
   // 风险等级配置
   const riskConfig = {
@@ -315,8 +385,27 @@ export default function ChildDashboard({
               </div>
             </div>
             {dailyReport.tips_for_children.length > 0 && (
-              <div className="mt-3 bg-white/10 rounded-xl px-3 py-2">
-                <p className="text-indigo-100 text-sm">💡 {dailyReport.tips_for_children[0]}</p>
+              <div className="mt-3 space-y-2">
+                {dailyReport.tips_for_children.slice(0, 3).map((tip, idx) => {
+                  const action = inferTipAction(tip);
+                  const Icon = action.icon;
+                  return (
+                    <div
+                      key={`${idx}-${tip.slice(0, 8)}`}
+                      className="bg-white/10 rounded-xl px-3 py-2 flex items-center gap-3"
+                    >
+                      <p className="text-indigo-100 text-sm flex-1 leading-6">💡 {tip}</p>
+                      <button
+                        onClick={action.onClick}
+                        className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-white shadow-sm transition ${action.color}`}
+                        title={action.label}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {action.label}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
