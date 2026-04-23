@@ -85,11 +85,60 @@ settings = get_settings()
 
 # ==================== 应用生命周期 ====================
 
+def _enforce_production_secrets() -> None:
+    """
+    生产环境（DEBUG=False）的不可妥协安全门：
+    - JWT_SECRET_KEY 必须由环境变量显式设置（不能依赖默认 token_urlsafe 自动生成
+      —— 否则每次重启密钥都不同，已签发的所有 JWT 立刻失效，全员被踢）
+    - ENCRYPTION_KEY 必须设置（敏感字段加密依赖此密钥）
+    - 不可使用占位符值（test_/your_/please-replace 等）
+
+    检测 JWT 是否来自 env：直接查 os.environ，不信任 settings 字段
+    （pydantic 默认值会让 settings.jwt_secret_key 永远非空，无法区分）
+    """
+    import os
+
+    if settings.debug:
+        return  # DEBUG=True 时只警告不阻断（保留开发便利）
+
+    fatal_errors: list[str] = []
+
+    if not os.environ.get("JWT_SECRET_KEY"):
+        fatal_errors.append(
+            "JWT_SECRET_KEY 必须通过环境变量显式设置（不可使用代码默认值），"
+            "否则每次重启所有用户被踢。"
+            " 生成方式：python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+        )
+    else:
+        jwt_status = _classify(os.environ.get("JWT_SECRET_KEY", ""))
+        if jwt_status != "real" or len(os.environ.get("JWT_SECRET_KEY", "")) < 32:
+            fatal_errors.append(
+                f"JWT_SECRET_KEY 看起来是占位符或太短（status={jwt_status}），生产环境必须 ≥32 字符且非占位。"
+            )
+
+    if not getattr(settings, "encryption_key", ""):
+        fatal_errors.append(
+            "ENCRYPTION_KEY 必须设置（敏感字段加密依赖此密钥）。"
+            " 生成方式：python -c 'import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'"
+        )
+
+    if fatal_errors:
+        msg = "\n".join(f"  - {e}" for e in fatal_errors)
+        logger.error("\n[FATAL] 生产环境启动被拒绝，缺少以下不可妥协的密钥：\n" + msg)
+        raise SystemExit(
+            "拒绝以不安全的配置启动生产服务。设置必需的环境变量后重试，"
+            "或临时设置 DEBUG=true 进入开发模式（但不要把开发模式部署到生产）。"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时执行
     logger.info("安心宝云端服务启动中...")
+
+    # 不可妥协的生产密钥校验（必须在 init_db 之前，启动失败也不留下半就绪状态）
+    _enforce_production_secrets()
 
     # 初始化数据库
     init_db()
@@ -445,12 +494,27 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # 模板
 templates = Jinja2Templates(directory="templates")
 
+# ===== 生产环境 OpenAPI 守卫 =====
+# 红色就绪度模块（参见 FEATURE_STATUS.md）在生产环境从 Swagger schema 隐藏，
+# 避免攻击者通过 /docs 探测到内部数据结构、避免投资人/合伙人误以为这些功能可用。
+# 路由本身保留（向后兼容已存在的客户端），仅从文档中隐藏 + 由路由层各自做 410/0 处理。
+_RED_ROUTERS_HIDE_IN_PROD = {"users", "admin", "analytics", "ai"}
+
+
+def _include_router_safely(router_obj, *, name: str = "") -> None:
+    """生产环境：对红色就绪度模块统一加 include_in_schema=False"""
+    if not settings.debug and name in _RED_ROUTERS_HIDE_IN_PROD:
+        app.include_router(router_obj, include_in_schema=False)
+    else:
+        app.include_router(router_obj)
+
+
 # 注册路由
 app.include_router(auth_router)  # 认证路由放在最前面
 app.include_router(chat_router)
 app.include_router(voice_router)
 app.include_router(notify_router)
-app.include_router(users_router)
+_include_router_safely(users_router, name="users")  # 已废弃，生产环境从 Swagger 隐藏
 app.include_router(health_router)
 app.include_router(video_router)
 app.include_router(accessibility_router)  # 无障碍设置
@@ -468,11 +532,11 @@ app.include_router(onboarding_router)  # 新手引导
 app.include_router(preferences_router)  # 个性化配置
 app.include_router(subscription_router)  # 会员订阅
 app.include_router(payment_router)  # 支付
-app.include_router(admin_router)  # 运营管理
-app.include_router(analytics_router)  # 数据分析
+_include_router_safely(admin_router, name="admin")  # 红色就绪度，生产隐藏
+_include_router_safely(analytics_router, name="analytics")  # 红色就绪度，生产隐藏
 app.include_router(marketing_router)  # 营销推广
 app.include_router(i18n_router)  # 国际化
-app.include_router(ai_router)  # AI功能
+_include_router_safely(ai_router, name="ai")  # 红色就绪度，生产隐藏（与 chat 域职责重叠）
 app.include_router(integration_router)  # 第三方集成
 app.include_router(support_router)  # 客户支持
 app.include_router(life_router)  # 生活服务

@@ -1,6 +1,20 @@
 # 安心宝功能就绪度三色灯（FEATURE_STATUS）
 
-> 最后更新：2026-04-23 · 基于静态代码审计 + 关键链路代码核实
+> 最后更新：2026-04-23（v2，含安全门 + 守卫修复轮）· 基于静态代码审计 + 关键链路代码核实
+
+## v2 增量（本轮 commit 内升降级）
+
+| 模块 | v1 | v2 | 变化原因 |
+|---|---|---|---|
+| API `users` | 🔴 内存存储 | 🟢 已显式废弃 + 生产返回 410 | [users.py](anxinbao-server/app/api/users.py) 全部端点 `deprecated=True`，DEBUG=False 强制 410 Gone，无消费者可证（参见迁移指引）|
+| API `admin` | 🔴 假数据 | 🟡 生产隐藏 + 0 数据 | [main.py](anxinbao-server/main.py) 中 `_include_router_safely` + [admin_service.py](anxinbao-server/app/services/admin_service.py) 中 `_SafeRandom` 守卫 |
+| API `analytics` | 🔴 假数据 | 🟡 生产隐藏 + 0 数据 | 同上 |
+| API `ai` | 🔴 重复职责 | 🟡 生产隐藏 | 与 chat 域重叠，从 Swagger 隐藏避免误用 |
+| Service `admin_service` | 🔴 23 random | 🟡 DEBUG 门控 | 生产环境一律返回 0/0.0/首项 |
+| Service `analytics_service` | 🔴 96 random | 🟡 DEBUG 门控 | 同上 |
+| 视频通话 | 🔴 无 TURN | 🟡 ICE env 化 + 失败提示 + 部署文档 | 见 [VIDEO_CALL_SETUP.md](anxinbao-server/docs/VIDEO_CALL_SETUP.md) |
+| 启动安全门 | ❌ 无 | ✅ 强校验 | [main.py](anxinbao-server/main.py) `_enforce_production_secrets`：JWT/ENCRYPTION 缺失则拒绝启动 |
+| CI 守卫 | ❌ 无 | 📋 模板就绪待启用 | [anxinbao-server/docs/ci/integration-self-check.yml](anxinbao-server/docs/ci/integration-self-check.yml) 同时验证"缺凭据应被拦"和"齐凭据应通过"。需要 PAT `workflow` scope 才能 push 到 `.github/workflows/`，启用步骤见 [docs/ci/README.md](anxinbao-server/docs/ci/README.md) |
 
 ## 一、为什么需要这份文档
 

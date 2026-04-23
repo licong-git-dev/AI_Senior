@@ -8,9 +8,55 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from decimal import Decimal
-import random
+import random as _real_random
 
 logger = logging.getLogger(__name__)
+
+
+class _SafeRandom:
+    """
+    生产环境（DEBUG=False）的随机数守卫。
+
+    本模块原本充斥 `random.randint(50000, 60000)`、`random.uniform(0.15, 0.25)`
+    这类**业务指标占位**（如"50000-60000 用户"、"500-800 万收入"、"15-25%
+    转化率"），任何投资人/合伙人翻一眼后台都会立刻怀疑数据真伪 → 信任度归零。
+
+    本守卫做最小破坏性修复：
+    - DEBUG=True：保持原 random 行为（前端 UI 调试需要）
+    - DEBUG=False：所有 random 调用返回 0 / 0.0 / 首项 / 空列表，让运营/接入方
+      看到诚实的"无数据"而非伪造数字
+    """
+
+    def randint(self, a: int, b: int) -> int:
+        from app.core.config import get_settings
+        if get_settings().debug:
+            return _real_random.randint(a, b)
+        return 0
+
+    def uniform(self, a: float, b: float) -> float:
+        from app.core.config import get_settings
+        if get_settings().debug:
+            return _real_random.uniform(a, b)
+        return 0.0
+
+    def choice(self, seq):
+        from app.core.config import get_settings
+        if not seq:
+            return None
+        if get_settings().debug:
+            return _real_random.choice(seq)
+        return seq[0]
+
+    def random(self) -> float:
+        from app.core.config import get_settings
+        if get_settings().debug:
+            return _real_random.random()
+        return 0.0
+
+
+# 模块内的 random 名称改为安全版本；所有 `random.randint/uniform/choice` 调用
+# 都路由到 _SafeRandom，无需逐行重写 40+ 处占位 → 零风险。
+random = _SafeRandom()
 
 
 class AdminRole(Enum):
@@ -257,9 +303,22 @@ class DashboardService:
         }
 
     def _get_mock_count(self, min_val: int, max_val: int) -> int:
+        """
+        ⚠️ 此方法是历史遗留的"伪运营数据"。生产环境（DEBUG=False）一律返回 0
+        而非 random，杜绝把虚假指标展示给运营/投资人；DEBUG=True 时保留 random
+        以便前端 UI 调试。
+        真实仪表盘数据应由 analytics_service 中的真实 SQL 聚合实现。
+        """
+        from app.core.config import get_settings
+        if not get_settings().debug:
+            return 0
         return random.randint(min_val, max_val)
 
     def _get_mock_amount(self, min_val: float, max_val: float) -> float:
+        """同 _get_mock_count，生产环境返回 0.0"""
+        from app.core.config import get_settings
+        if not get_settings().debug:
+            return 0.0
         return round(random.uniform(min_val, max_val), 2)
 
 

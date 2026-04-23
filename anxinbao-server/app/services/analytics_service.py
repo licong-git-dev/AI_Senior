@@ -8,10 +8,45 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from decimal import Decimal
-import random
+import random as _real_random
 import json
 
 logger = logging.getLogger(__name__)
+
+
+class _SafeRandom:
+    """
+    生产环境（DEBUG=False）的随机数守卫。
+
+    本模块原本含 ~93 处 random 调用，几乎所有"业务指标"都是 random 占位
+    （如"今日 DAU 1.5-2 万"），任何运营或投资人翻看都会立刻发现造假。
+
+    DEBUG=True 时保留 random（前端 UI 调试需要）；
+    DEBUG=False 时一律返回 0/0.0/首项，让运营看到诚实的"无数据"而非伪造数字。
+    """
+
+    def randint(self, a: int, b: int) -> int:
+        from app.core.config import get_settings
+        return _real_random.randint(a, b) if get_settings().debug else 0
+
+    def uniform(self, a: float, b: float) -> float:
+        from app.core.config import get_settings
+        return _real_random.uniform(a, b) if get_settings().debug else 0.0
+
+    def choice(self, seq):
+        from app.core.config import get_settings
+        if not seq:
+            return None
+        return _real_random.choice(seq) if get_settings().debug else seq[0]
+
+    def random(self) -> float:
+        from app.core.config import get_settings
+        return _real_random.random() if get_settings().debug else 0.0
+
+
+# 模块内的 random 名称改为安全版本；所有 `random.xxx` 调用都路由到 _SafeRandom，
+# 无需逐行重写 90+ 处占位 → 零风险。
+random = _SafeRandom()
 
 
 class ReportPeriod(Enum):

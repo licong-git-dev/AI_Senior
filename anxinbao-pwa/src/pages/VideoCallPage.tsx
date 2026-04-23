@@ -13,6 +13,25 @@ interface VideoCallPageProps {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// ICE 服务器配置：从环境变量读取 TURN，缺失则只用 STUN（国内 NAT 70% 场景打不通）
+// 配置参见 anxinbao-server/docs/VIDEO_CALL_SETUP.md
+function buildIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+  ];
+  const turnUrl = import.meta.env.VITE_TURN_URL;
+  if (turnUrl) {
+    servers.push({
+      urls: turnUrl, // e.g. "turn:turn.example.com:3478"
+      username: import.meta.env.VITE_TURN_USERNAME || undefined,
+      credential: import.meta.env.VITE_TURN_CREDENTIAL || undefined,
+    });
+  }
+  return servers;
+}
+
+const TURN_CONFIGURED = !!import.meta.env.VITE_TURN_URL;
+
 export default function VideoCallPage({
   userId,
   targetId,
@@ -107,9 +126,7 @@ export default function VideoCallPage({
 
       // 创建RTCPeerConnection
       const config: RTCConfiguration = {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-        ],
+        iceServers: buildIceServers(),
       };
 
       const pc = new RTCPeerConnection(config);
@@ -140,7 +157,19 @@ export default function VideoCallPage({
 
       pc.onconnectionstatechange = () => {
         console.log('Connection state:', pc.connectionState);
-        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        if (pc.connectionState === 'failed') {
+          // 失败时给老人/家属一条可读的解释，区分 NAT 穿透失败 vs 通用故障
+          if (!TURN_CONFIGURED) {
+            setError(
+              '视频通话连接失败：当前未配置 TURN 中继服务器，'
+              + '在部分家庭网络（约 70% 国内 NAT 场景）下无法直连。'
+              + '建议改用语音电话；或联系管理员配置 TURN 服务（见 docs/VIDEO_CALL_SETUP.md）。'
+            );
+          } else {
+            setError('视频通话连接失败，请检查网络后重试。');
+          }
+          setCallStatus('ended');
+        } else if (pc.connectionState === 'disconnected') {
           setCallStatus('ended');
         }
       };

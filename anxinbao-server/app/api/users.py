@@ -1,46 +1,44 @@
 """
-API路由 - 用户管理
-管理老人和家属信息
+API 路由 - 用户管理（已废弃，仅保留向后兼容）
+
+⚠️ 历史问题：本模块使用进程内 dict（elders_store/family_store）作为存储，
+   服务重启即数据全丢；上线即等于事故。
+
+⚠️ 现状：
+   - 前端零调用（参见 grep '/api/users/elder' 等）
+   - 唯一引用是 tests/api/test_endpoints.py 中的防御性 404 检查
+   - 业务能力已被 auth/family/users(profile) 等模块覆盖
+
+决策（2026-04-23）：废弃本模块，避免：
+   1. 投资人/合伙人翻 OpenAPI 看到"老人/家属创建"端点误以为可用
+   2. 攻击者发现内存存储漏洞被利用
+   3. 误用本端点写入数据后重启丢失
+
+迁移指引（如真有人在用，应改为以下端点）：
+   POST /api/users/elder/create     ->  POST /api/auth/register（role=elder）
+   POST /api/users/family/create    ->  POST /api/family/binding-requests
+   GET  /api/users/family/{elder_id}->  GET  /api/family/groups
+   *绑定设备*                       ->  POST /api/iot/bind
 """
-from fastapi import APIRouter, HTTPException
+import logging
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from typing import List, Dict, Optional
-from datetime import datetime
-import uuid
+from typing import List, Optional
 
-router = APIRouter(prefix="/api/users", tags=["用户管理"])
+from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+settings = get_settings()
 
-class ElderProfile(BaseModel):
-    """老人档案"""
-    id: str
-    name: str
-    age: int
-    gender: str  # male/female
-    phone: Optional[str] = None
-    address: Optional[str] = None
-    health_conditions: List[str] = []  # 既往病史
-    medications: List[str] = []  # 正在服用的药物
-    dialect: str = "mandarin"  # 方言偏好
-    device_id: Optional[str] = None
-    created_at: str
+router = APIRouter(
+    prefix="/api/users",
+    tags=["⚠️ 已废弃"],
+    deprecated=True,
+)
 
 
-class FamilyMember(BaseModel):
-    """家属信息"""
-    id: str
-    elder_id: str  # 关联的老人ID
-    name: str
-    relationship: str  # 与老人的关系
-    phone: str
-    wechat_openid: Optional[str] = None
-    is_primary: bool = False  # 是否主要联系人
-    notify_enabled: bool = True  # 是否接收通知
-    created_at: str
-
-
+# 请求模型保持原样以保证 OpenAPI schema 兼容
 class CreateElderRequest(BaseModel):
-    """创建老人档案请求"""
     name: str
     age: int
     gender: str
@@ -52,7 +50,6 @@ class CreateElderRequest(BaseModel):
 
 
 class CreateFamilyRequest(BaseModel):
-    """创建家属请求"""
     elder_id: str
     name: str
     relationship: str
@@ -60,136 +57,64 @@ class CreateFamilyRequest(BaseModel):
     is_primary: bool = False
 
 
-# 数据存储（生产环境用数据库）
-elders_store: Dict[str, ElderProfile] = {}
-family_store: Dict[str, List[FamilyMember]] = {}
+_GONE_DETAIL = {
+    "deprecated": True,
+    "removed_reason": "本模块使用进程内内存存储，重启即丢失数据，已下线。",
+    "use_instead": {
+        "create_elder": "POST /api/auth/register (role='elder')",
+        "create_family": "POST /api/family/binding-requests",
+        "list_family": "GET /api/family/groups",
+        "bind_device": "POST /api/iot/bind",
+    },
+}
 
 
-@router.post("/elder/create")
+def _gone():
+    """生产环境：直接返回 410 Gone；开发环境：仅记日志后继续 404，避免破坏既有测试"""
+    if not settings.debug:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail=_GONE_DETAIL)
+    logger.warning(
+        "调用了已废弃的 /api/users/* 端点；这些端点在生产环境会返回 410。"
+        " 请使用 _GONE_DETAIL.use_instead 中列出的替代接口。"
+    )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found (deprecated)")
+
+
+@router.post("/elder/create", deprecated=True)
 async def create_elder(request: CreateElderRequest):
-    """创建老人档案"""
-    elder_id = str(uuid.uuid4())
-
-    elder = ElderProfile(
-        id=elder_id,
-        name=request.name,
-        age=request.age,
-        gender=request.gender,
-        phone=request.phone,
-        address=request.address,
-        health_conditions=request.health_conditions,
-        medications=request.medications,
-        dialect=request.dialect,
-        created_at=datetime.now().isoformat()
-    )
-
-    elders_store[elder_id] = elder
-
-    return {
-        'success': True,
-        'elder_id': elder_id,
-        'message': "老人档案创建成功"
-    }
+    _gone()
 
 
-@router.get("/elder/{elder_id}")
+@router.get("/elder/{elder_id}", deprecated=True)
 async def get_elder(elder_id: str):
-    """获取老人档案"""
-    elder = elders_store.get(elder_id)
-    if not elder:
-        raise HTTPException(status_code=404, detail="老人档案不存在")
-    return elder.model_dump()
+    _gone()
 
 
-@router.put("/elder/{elder_id}")
+@router.put("/elder/{elder_id}", deprecated=True)
 async def update_elder(elder_id: str, request: CreateElderRequest):
-    """更新老人档案"""
-    elder = elders_store.get(elder_id)
-    if not elder:
-        raise HTTPException(status_code=404, detail='老人档案不存在')
-
-    elder.name = request.name
-    elder.age = request.age
-    elder.gender = request.gender
-    elder.phone = request.phone
-    elder.address = request.address
-    elder.health_conditions = request.health_conditions
-    elder.medications = request.medications
-    elder.dialect = request.dialect
-
-    return {'success': True, 'message': "档案更新成功"}
+    _gone()
 
 
-@router.post("/family/create")
+@router.post("/family/create", deprecated=True)
 async def create_family_member(request: CreateFamilyRequest):
-    """添加家属"""
-    if request.elder_id not in elders_store:
-        raise HTTPException(status_code=404, detail='老人档案不存在')
-
-    family_id = str(uuid.uuid4())
-
-    family = FamilyMember(
-        id=family_id,
-        elder_id=request.elder_id,
-        name=request.name,
-        relationship=request.relationship,
-        phone=request.phone,
-        is_primary=request.is_primary,
-        created_at=datetime.now().isoformat()
-    )
-
-    if request.elder_id not in family_store:
-        family_store[request.elder_id] = []
-
-    family_store[request.elder_id].append(family)
-
-    return {
-        'success': True,
-        'family_id': family_id,
-        'message': "家属添加成功"
-    }
+    _gone()
 
 
-@router.get("/family/{elder_id}")
+@router.get("/family/{elder_id}", deprecated=True)
 async def get_family_members(elder_id: str):
-    """获取老人的家属列表"""
-    return {
-        'elder_id': elder_id,
-        "family_members": [f.model_dump() for f in family_store.get(elder_id, [])]
-    }
+    _gone()
 
 
-@router.delete("/family/{family_id}")
+@router.delete("/family/{family_id}", deprecated=True)
 async def remove_family_member(family_id: str, elder_id: str):
-    """移除家属"""
-    if elder_id not in family_store:
-        raise HTTPException(status_code=404, detail='记录不存在')
-
-    family_store[elder_id] = [
-        f for f in family_store[elder_id]
-        if f.id != family_id
-    ]
-
-    return {'success': True, 'message': "家属已移除"}
+    _gone()
 
 
-@router.get("/elder/{elder_id}/bind-device")
+@router.get("/elder/{elder_id}/bind-device", deprecated=True)
 async def bind_device(elder_id: str, device_id: str):
-    """绑定设备"""
-    elder = elders_store.get(elder_id)
-    if not elder:
-        raise HTTPException(status_code=404, detail='老人档案不存在')
-
-    elder.device_id = device_id
-
-    return {'success': True, 'message': "设备绑定成功"}
+    _gone()
 
 
-@router.get("/device/{device_id}")
+@router.get("/device/{device_id}", deprecated=True)
 async def get_elder_by_device(device_id: str):
-    """通过设备ID获取老人信息"""
-    for elder in elders_store.values():
-        if elder.device_id == device_id:
-            return elder.model_dump()
-
-    raise HTTPException(status_code=404, detail="设备未绑定")
+    _gone()
