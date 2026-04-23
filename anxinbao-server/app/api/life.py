@@ -2,25 +2,52 @@
 生活服务API
 提供天气、新闻、便民服务、本地生活等接口
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from functools import wraps
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 
 from app.services.life_service import (
     life_service,
+    LifeServiceNotImplemented,
     WeatherType,
     AirQuality,
     NewsCategory,
-    ServiceType
+    ServiceType,
 )
 from app.core.security import get_current_user
 
 router = APIRouter(prefix="/api/life", tags=["生活服务"])
 
 
+def _life_route(handler):
+    """
+    生活服务路由装饰器：把 LifeServiceNotImplemented 翻译为 HTTP 501，
+    给前端可读的"未实现"提示，避免在生产环境返回 random 假数据。
+    """
+    @wraps(handler)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await handler(*args, **kwargs)
+        except LifeServiceNotImplemented as e:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail={
+                    "code": "feature_not_implemented",
+                    "message": str(e),
+                    "fallback": (
+                        "前端建议改用 wttr.in / 高德天气 / 心知天气 等真实数据源；"
+                        " 后端接入真实数据后本端点会自动恢复。"
+                    ),
+                },
+            )
+    return wrapper
+
+
 # ==================== 天气API ====================
 
 @router.get("/weather/current")
+@_life_route
 async def get_current_weather(
     city: str = Query('北京', description="城市名称")
 ):
@@ -38,6 +65,7 @@ async def get_current_weather(
 
 
 @router.get("/weather/forecast")
+@_life_route
 async def get_weather_forecast(
     city: str = Query('北京', description='城市名称'),
     days: int = Query(7, ge=1, le=15, description="预报天数")
@@ -55,6 +83,7 @@ async def get_weather_forecast(
 
 
 @router.get("/weather/advice")
+@_life_route
 async def get_elderly_weather_advice(
     city: str = Query('北京', description="城市名称")
 ):

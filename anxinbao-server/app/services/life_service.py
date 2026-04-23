@@ -9,6 +9,24 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+
+class LifeServiceNotImplemented(NotImplementedError):
+    """
+    标记：本模块的天气/新闻/便民服务尚未接入真实数据源（仅有 random 占位）。
+    生产环境（DEBUG=False）抛出此异常；API 层捕获后返回 HTTP 501。
+    DEBUG=True 时不抛出，允许前端继续用假数据做 UI 调试。
+    """
+
+
+def _enforce_real_data_source(feature: str) -> None:
+    """生产环境守卫：未实现的真实数据源时拒绝返回假数据"""
+    from app.core.config import get_settings
+    if not get_settings().debug:
+        raise LifeServiceNotImplemented(
+            f"life_service.{feature} 当前仅有 random 占位，未接入真实数据源。"
+            f" 在生产环境拒绝返回伪数据。请接入真实接口后再启用。"
+        )
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,8 +147,9 @@ class WeatherService:
     }
 
     def get_weather(self, city: str) -> WeatherInfo:
-        """获取天气信息"""
-        # 模拟天气数据
+        """获取天气信息（mock 实现，生产环境会抛 LifeServiceNotImplemented）"""
+        _enforce_real_data_source("WeatherService.get_weather")
+        # 模拟天气数据（仅 DEBUG 模式可达）
         weather_type = random.choice(list(WeatherType))
         air_quality = random.choice(list(AirQuality))
 
@@ -167,7 +186,8 @@ class WeatherService:
         )
 
     def get_forecast(self, city: str, days: int = 7) -> List[WeatherInfo]:
-        """获取天气预报"""
+        """获取天气预报（mock 实现，生产环境会抛 LifeServiceNotImplemented）"""
+        _enforce_real_data_source("WeatherService.get_forecast")
         forecasts = []
         for i in range(days):
             date = (datetime.now() + timedelta(days=i)).strftime("%Y-%m-%d")

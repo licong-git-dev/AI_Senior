@@ -1,6 +1,11 @@
 """
 运营管理后台API
 提供数据仪表盘、用户管理、内容审核、系统配置等接口
+
+⚠️ 安全：本路由全量数据是当前 admin_service 的 mock 输出（生产环境已通过
+   _SafeRandom 清零）。即便如此，所有端点必须强鉴权 admin 角色，避免任意
+   登录用户拼路径访问。历史 verify_admin 注释了"为演示目的，允许任何登录
+   用户访问"——这是上线前必修的提权漏洞。
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -12,27 +17,40 @@ from app.services.admin_service import (
     AdminRole,
     ReportType
 )
-from app.core.security import get_current_user
+from app.core.security import get_current_user, UserInfo
+from app.core.deps import get_current_admin
 
 router = APIRouter(prefix="/api/admin", tags=["运营管理"])
 
 
 # ==================== 权限验证 ====================
 
-async def verify_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    """验证管理员身份"""
-    # 实际实现中应检查用户是否为管理员
-    # 这里简化处理，假设特定用户ID为管理员
-    user_id = int(current_user.get('sub', 0))
+async def verify_admin(current_user: UserInfo = Depends(get_current_admin)) -> Dict[str, Any]:
+    """
+    验证管理员身份。
 
-    # 模拟管理员验证
-    admin = admin_service.get_admin(user_id)
+    历史版本对"未注册到 admin_service 的用户"放行（自承"演示目的"），
+    任意登录用户都能访问 /api/admin/*。本版本：
+    1. 通过 get_current_admin 强校验 JWT.role == 'admin'
+    2. 再核对 admin_service 中确实注册了该 admin_id，防御 token 伪造或角色提升
+    """
+    user_id_str = current_user.user_id  # JWT sub
+    try:
+        user_id_int = int(user_id_str)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=403,
+            detail="管理员身份无效（user_id 非数字）",
+        )
+
+    admin = admin_service.get_admin(user_id_int)
     if not admin:
-        # 为演示目的，允许任何登录用户访问
-        # 实际生产环境应严格验证
-        return {'admin_id': user_id, 'role': 'operator'}
+        raise HTTPException(
+            status_code=403,
+            detail="管理员账号未在 admin_service 中注册，请联系超级管理员开通",
+        )
 
-    return {'admin_id': admin.admin_id, "role": admin.role.value}
+    return {"admin_id": admin.admin_id, "role": admin.role.value}
 
 
 # ==================== 请求模型 ====================
