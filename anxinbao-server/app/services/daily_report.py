@@ -389,16 +389,40 @@ class DailyReportService:
                 if any(kw in all_user_text for kw in keywords):
                     summary.topics.append(topic)
 
-            # 提取关键引用（取最长的2条用户消息作为代表）
-            user_contents = sorted(
-                [(c.content or "") for c in user_msgs if c.content],
-                key=len,
-                reverse=True
+            # 关键引用脱敏：不直接把老人原话转给家属
+            # 老人对 AI 倾诉常涉及对儿媳/老伴/邻里的抱怨、健康隐私、情绪低谷，
+            # 原话直出会破坏老人对产品的信任，是产品级的伦理风险。
+            # 这里改为基于已抽取的 topics 输出脱敏短语，保持 List[str] 契约不变。
+            _SENSITIVE_KEYWORDS = (
+                "儿媳", "媳妇", "女婿", "老伴", "对象",
+                "吵架", "讨厌", "烦", "骂", "气",
+                "痛", "病", "血压", "头晕", "不舒服",
+                "钱", "存款", "遗嘱",
             )
-            for content in user_contents[:2]:
-                # 截取不超过30个字
-                quote = content[:30] + ("..." if len(content) > 30 else "")
-                summary.key_quotes.append(quote)
+
+            def _is_safe_for_family(text: str) -> bool:
+                return not any(kw in text for kw in _SENSITIVE_KEYWORDS)
+
+            # 优先：基于已抽取的 topics 输出脱敏短语
+            safe_topic_phrases = [
+                f"和安心宝聊到了「{t}」"
+                for t in summary.topics
+                if t != "健康"  # 健康类话题统一走 health_alerts，不在此暴露细节
+            ]
+            for phrase in safe_topic_phrases[:2]:
+                summary.key_quotes.append(phrase)
+
+            # 回退：没有 topic 时，挑选 1 条通过敏感词检查的最长原话（截断 + 加引号）
+            if not summary.key_quotes:
+                for content in sorted(
+                    [(c.content or "") for c in user_msgs if c.content],
+                    key=len,
+                    reverse=True,
+                ):
+                    if _is_safe_for_family(content):
+                        quote = content[:30] + ("…" if len(content) > 30 else "")
+                        summary.key_quotes.append(f"今天提到：「{quote}」")
+                        break
 
         except Exception as e:
             logger.error(f"对话汇总失败: {e}")

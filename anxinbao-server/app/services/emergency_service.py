@@ -408,16 +408,25 @@ class EmergencyService:
         phone_numbers = [contact.phone for contact in contacts]
 
         # Send SMS emergency alerts
+        # 注意：参数名必须与 SMSService.send_emergency_alert 严格一致
+        # （历史上曾因参数名错配导致 TypeError 被 except 静默吞掉，SOS 短信永远发不出去）
         try:
             from app.services.sms_service import sms_service
-            await sms_service.send_emergency_alert(
-                phone_numbers=phone_numbers,
-                user_name=alert.user_name,
-                phone="",
-                location_address=location_address
+            sms_result = await sms_service.send_emergency_alert(
+                phone_number=phone_numbers,
+                elderly_name=alert.user_name,
+                elderly_phone="",
+                location=location_address,
             )
+            if not sms_result or not sms_result.get("success"):
+                logger.error(f"紧急SMS发送失败: alert_id={alert.alert_id} result={sms_result}")
+            elif sms_result.get("mock"):
+                logger.warning(
+                    f"紧急SMS走入模拟模式（短信服务未真实配置）: alert_id={alert.alert_id} "
+                    f"phones={phone_numbers}"
+                )
         except Exception as e:
-            logger.error(f"发送紧急SMS通知失败: {e}")
+            logger.exception(f"发送紧急SMS通知异常: alert_id={alert.alert_id} err={e}")
 
         # Send via notification service with EMERGENCY template
         try:

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { MessageCircle, Phone, Loader2, Check, X, Pill, Users, Sparkles } from 'lucide-react';
@@ -23,6 +23,10 @@ export default function StandbyScreen({ onWakeUp, onNavigate }: StandbyScreenPro
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [proactiveGreeting, setProactiveGreeting] = useState<string | null>(null);
+  // SOS 长按计时（防止老人误触；按住 1.5 秒才进入确认）
+  const [sosHoldProgress, setSosHoldProgress] = useState(0); // 0~100
+  const sosHoldTimer = useRef<number | null>(null);
+  const sosProgressTimer = useRef<number | null>(null);
 
   // 更新时间
   useEffect(() => {
@@ -173,32 +177,71 @@ export default function StandbyScreen({ onWakeUp, onNavigate }: StandbyScreenPro
     return `${lunarMonths[month % 12]}${lunarDays[(day - 1) % 30]}`;
   };
 
-  // Phone 按钮样式（反映 SOS 状态）
+  // SOS 按钮：放大到 96px、独占一行、长按 1.5s 触发，杜绝老人误触
+  // （历史上 SOS 与"邀请家人"相邻且仅 64px，单击即弹确认弹窗，是 UX 上的致命相邻）
+  const SOS_HOLD_MS = 1500;
+
+  const startSosHold = () => {
+    if (sosState !== 'idle') return;
+    const startedAt = Date.now();
+    setSosHoldProgress(0);
+    sosProgressTimer.current = window.setInterval(() => {
+      const pct = Math.min(100, ((Date.now() - startedAt) / SOS_HOLD_MS) * 100);
+      setSosHoldProgress(pct);
+    }, 50);
+    sosHoldTimer.current = window.setTimeout(() => {
+      cancelSosHold();
+      setSosState('confirm');
+    }, SOS_HOLD_MS);
+  };
+
+  const cancelSosHold = () => {
+    if (sosHoldTimer.current) {
+      clearTimeout(sosHoldTimer.current);
+      sosHoldTimer.current = null;
+    }
+    if (sosProgressTimer.current) {
+      clearInterval(sosProgressTimer.current);
+      sosProgressTimer.current = null;
+    }
+    setSosHoldProgress(0);
+  };
+
+  // 卸载时清理计时器，防止泄漏（直接读 ref，避免 useEffect 依赖列表 lint 警告）
+  useEffect(() => {
+    return () => {
+      if (sosHoldTimer.current) clearTimeout(sosHoldTimer.current);
+      if (sosProgressTimer.current) clearInterval(sosProgressTimer.current);
+    };
+  }, []);
+
+  // Phone 按钮样式（96px、明显的红色基色，反映 SOS 状态）
   const getPhoneButtonClass = () => {
+    const base = 'relative w-24 h-24 rounded-3xl flex items-center justify-center transition-all active:scale-95 ring-4 ring-white/20 shadow-lg select-none';
     switch (sosState) {
       case 'confirm':
-        return 'w-16 h-16 bg-red-500/80 backdrop-blur-sm rounded-2xl flex items-center justify-center transition-all active:scale-95 animate-pulse';
+        return `${base} bg-red-500 animate-pulse`;
       case 'sending':
-        return 'w-16 h-16 bg-yellow-500/80 backdrop-blur-sm rounded-2xl flex items-center justify-center transition-all active:scale-95';
+        return `${base} bg-yellow-500`;
       case 'sent':
-        return 'w-16 h-16 bg-green-500/80 backdrop-blur-sm rounded-2xl flex items-center justify-center transition-all active:scale-95';
+        return `${base} bg-green-600`;
       case 'error':
-        return 'w-16 h-16 bg-red-600/80 backdrop-blur-sm rounded-2xl flex items-center justify-center transition-all active:scale-95';
+        return `${base} bg-red-700`;
       default:
-        return 'w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center hover:bg-white/30 transition-all active:scale-95';
+        return `${base} bg-red-500/85 hover:bg-red-500`;
     }
   };
 
   const getPhoneButtonIcon = () => {
     switch (sosState) {
       case 'sending':
-        return <Loader2 className="w-8 h-8 text-white animate-spin" />;
+        return <Loader2 className="w-10 h-10 text-white animate-spin" />;
       case 'sent':
-        return <Check className="w-8 h-8 text-white" />;
+        return <Check className="w-10 h-10 text-white" />;
       case 'error':
-        return <X className="w-8 h-8 text-white" />;
+        return <X className="w-10 h-10 text-white" />;
       default:
-        return <Phone className="w-8 h-8 text-white" />;
+        return <Phone className="w-10 h-10 text-white" />;
     }
   };
 
@@ -273,45 +316,59 @@ export default function StandbyScreen({ onWakeUp, onNavigate }: StandbyScreenPro
         </div>
       </div>
 
-      {/* 快捷入口 */}
-      <div className="absolute bottom-32 left-0 right-0 flex justify-center gap-6">
+      {/* 普通快捷入口（聊天 / 邀请家人 / 用药）：放大到 80px、与 SOS 完全分离 */}
+      <div className="absolute bottom-60 left-0 right-0 flex justify-center gap-10">
         {/* 聊天按钮 */}
         <button
           onClick={(e) => { e.stopPropagation(); onWakeUp(); }}
-          className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center hover:bg-white/30 transition-all active:scale-95"
+          className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-3xl flex items-center justify-center hover:bg-white/30 transition-all active:scale-95"
+          title="开始聊天"
         >
-          <MessageCircle className="w-8 h-8 text-white" />
+          <MessageCircle className="w-10 h-10 text-white" />
         </button>
 
-        {/* 邀请家人按钮 */}
+        {/* 邀请家人按钮（远离 SOS） */}
         <button
           onClick={(e) => { e.stopPropagation(); setShowInviteModal(true); setInviteCode(null); setInviteError(null); }}
-          className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center hover:bg-white/30 transition-all active:scale-95"
+          className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-3xl flex items-center justify-center hover:bg-white/30 transition-all active:scale-95"
           title="邀请家人"
         >
-          <Users className="w-8 h-8 text-white" />
+          <Users className="w-10 h-10 text-white" />
         </button>
 
         {/* 用药提醒按钮 */}
         <button
           onClick={(e) => { e.stopPropagation(); onNavigate?.('medication'); }}
-          className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center hover:bg-white/30 transition-all active:scale-95"
+          className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-3xl flex items-center justify-center hover:bg-white/30 transition-all active:scale-95"
           title="今日用药"
         >
-          <Pill className="w-8 h-8 text-white" />
+          <Pill className="w-10 h-10 text-white" />
         </button>
+      </div>
 
-        {/* SOS / 紧急求助按钮 */}
+      {/* SOS 紧急求助按钮：独立位置、放大到 96px、长按 1.5s 触发 */}
+      <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center gap-2">
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (sosState === 'idle') setSosState('confirm');
-          }}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => { e.stopPropagation(); startSosHold(); }}
+          onPointerUp={(e) => { e.stopPropagation(); cancelSosHold(); }}
+          onPointerLeave={cancelSosHold}
+          onPointerCancel={cancelSosHold}
           className={getPhoneButtonClass()}
+          title="按住 1.5 秒呼叫家人"
         >
           {getPhoneButtonIcon()}
+          {/* 长按进度环（视觉反馈，避免老人不知道还在按） */}
+          {sosHoldProgress > 0 && sosState === 'idle' && (
+            <span
+              className="absolute inset-0 rounded-3xl ring-4 ring-white pointer-events-none"
+              style={{ clipPath: `inset(${100 - sosHoldProgress}% 0 0 0)` }}
+            />
+          )}
         </button>
-
+        <span className="text-sm text-white/80 select-none">
+          紧急求助 · 按住 1.5 秒
+        </span>
       </div>
 
       {/* SOS 确认弹窗 */}

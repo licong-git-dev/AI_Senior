@@ -110,6 +110,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"恢复紧急事件失败: {e}")
 
+    # 关键第三方集成真实性自检（非致命，只打印告警）
+    # 杜绝"凭据缺失时静默走入 mock 模式"在生产环境无人察觉
+    try:
+        critical_pairs = [
+            ("aliyun_sms (SOS短信)", getattr(settings, "aliyun_access_key_id", "")),
+            ("alipay (订阅付费)", getattr(settings, "alipay_app_id", "")),
+            ("encryption_key (敏感数据)", getattr(settings, "encryption_key", "")),
+        ]
+        for name, value in critical_pairs:
+            classified = _classify(value)
+            if classified != "real":
+                logger.warning(
+                    f"⚠️  关键集成未配置真实凭据: {name} status={classified}。"
+                    f"该链路将走入 mock 或失败。详见 GET /health/integrations。"
+                )
+    except Exception as e:
+        logger.warning(f"集成自检失败（非致命）: {e}")
+
     logger.info("安心宝云端服务启动完成")
 
     yield  # 应用运行中
@@ -520,6 +538,87 @@ async def index(request: Request):
 async def health_check():
     """健康检查（简单版）"""
     return {"status": "ok", "service": "anxinbao-server", "version": "1.0.0"}
+
+
+# 关键第三方集成的占位特征：用于识别"看似配置实则是测试样板"
+_PLACEHOLDER_HINTS = ("test_", "your_", "xxx", "changeme", "placeholder", "example")
+
+
+def _classify(value: str | None) -> str:
+    """将凭据值分类为 real / placeholder / missing。"""
+    if not value:
+        return "missing"
+    v = str(value).strip().lower()
+    if not v:
+        return "missing"
+    if any(h in v for h in _PLACEHOLDER_HINTS):
+        return "placeholder"
+    return "real"
+
+
+@app.get("/health/integrations")
+async def integrations_health():
+    """
+    第三方集成真实性自检：暴露每个外部服务是 real/mock/missing。
+    目的是杜绝"凭据缺失时静默走入 mock"导致 SOS 短信、支付等关键链路在生产环境
+    悄无声息地失败。运维和投资人能用这个端点一眼看清"哪些链路是真实的"。
+    """
+    # 注意：属性名必须与 services/ 中实际读取的字段一致
+    # （历史上 .env.example 写 SMS_ACCESS_KEY_ID 但代码读 aliyun_access_key_id，
+    #  导致用户填了 .env 也无效，是另一个隐藏的"凭据失联"bug）
+    checks = [
+        ("dashscope_qwen",
+         _classify(getattr(settings, "dashscope_api_key", "")),
+         "通义千问 AI 对话"),
+        ("xfyun_asr_tts",
+         _classify(getattr(settings, "xfyun_appid", "")
+                   and getattr(settings, "xfyun_api_key", "")
+                   and getattr(settings, "xfyun_api_secret", "")),
+         "讯飞语音识别/合成（含方言）"),
+        ("aliyun_sms",
+         _classify(getattr(settings, "aliyun_access_key_id", "")),
+         "阿里云短信（健康告警/SOS）"),
+        ("jpush",
+         _classify(getattr(settings, "jpush_app_key", "")),
+         "极光推送"),
+        ("alipay",
+         _classify(getattr(settings, "alipay_app_id", "")),
+         "支付宝（订阅付费）"),
+        ("encryption_key",
+         _classify(getattr(settings, "encryption_key", "")),
+         "敏感数据加密密钥"),
+        ("jwt_secret",
+         "real" if (
+             getattr(settings, "jwt_secret_key", "")
+             and len(str(settings.jwt_secret_key)) >= 32
+         ) else "weak",
+         "JWT 签名密钥"),
+    ]
+
+    results = []
+    critical_missing = []
+    for name, status, desc in checks:
+        results.append({
+            "name": name,
+            "description": desc,
+            "status": status,  # real / placeholder / missing / weak
+            "production_ready": status == "real",
+        })
+        # SOS、支付、加密、JWT 是不可降级的关键链路
+        if name in {"aliyun_sms", "alipay", "encryption_key", "jwt_secret"} \
+                and status != "real":
+            critical_missing.append(name)
+
+    return {
+        "service": "anxinbao-server",
+        "production_ready": len(critical_missing) == 0,
+        "critical_missing": critical_missing,
+        "integrations": results,
+        "note": (
+            "production_ready=false 表示存在未真实配置的关键链路；"
+            "上线前必须把 critical_missing 全部解决。"
+        ),
+    }
 
 
 @app.get("/api/info")
