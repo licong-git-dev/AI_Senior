@@ -242,9 +242,13 @@ class AuditLogService:
             request_params=self._sanitize_params(request_params),
             response_code=response_code,
             duration_ms=duration_ms,
-            details=details or {},
-            old_value=old_value,
-            new_value=new_value,
+            # 关键修复：details / old_value / new_value 历史上未脱敏，
+            # 调用方一旦把 user dict 整个塞进来（含 password、phone、id_card 等），
+            # 这些 PII 会被原文写入审计日志（数据库 + logger.info）。
+            # 现在三者都强制走脱敏 + 递归。
+            details=self._sanitize_params(details or {}),
+            old_value=self._sanitize_params(old_value),
+            new_value=self._sanitize_params(new_value),
             error_message=error_message
         )
 
@@ -261,22 +265,58 @@ class AuditLogService:
 
         return audit_log
 
-    def _sanitize_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """清理敏感参数"""
-        if not params:
+    # 敏感字段黑名单（合并：账号凭据 + PII + 支付/身份证件）
+    # key 名称只要"包含"以下任一子串（大小写不敏感）即被脱敏。
+    # 历史版本只盖账号凭据；老人 PII（手机、身份证、地址）从未脱敏，
+    # 一旦运营泄漏审计日志或日志推到 ELK 就是合规事故。
+    _SENSITIVE_KEY_HINTS = (
+        # 凭据
+        "password", "passwd", "pwd", "token", "secret", "credential", "api_key",
+        "private_key", "session", "cookie", "auth", "authorization",
+        # 中国 PII
+        "id_card", "idcard", "id_number", "shenfenzheng", "身份证",
+        "phone", "mobile", "telephone", "手机",
+        "address", "住址", "地址",
+        "bank_account", "card_no", "银行",
+        # 健康敏感（HIPAA 等价）
+        "medical_record", "diagnosis", "prescription",
+    )
+
+    # 替换占位（保留长度提示有助于排错，但不暴露内容）
+    @staticmethod
+    def _redact(value: Any) -> str:
+        if value is None:
+            return "***REDACTED(empty)***"
+        try:
+            length = len(str(value))
+        except Exception:
+            length = -1
+        return f"***REDACTED(len={length})***"
+
+    def _sanitize_params(self, params: Any) -> Any:
+        """
+        清理敏感参数（递归）。
+
+        改进点（vs v1）：
+        1. 递归处理 dict / list / tuple，杜绝"嵌套对象绕过脱敏"
+        2. 黑名单扩展到 PII 与健康敏感字段
+        3. 用 ***REDACTED(len=N)*** 占位，保留长度便于排错但不暴露内容
+        """
+        if params is None:
             return None
-
-        sensitive_keys = ['password', 'token', 'secret', 'key', 'credential']
-        sanitized = {}
-
-        for key, value in params.items():
-            key_lower = key.lower()
-            if any(s in key_lower for s in sensitive_keys):
-                sanitized[key] = "***REDACTED***"
-            else:
-                sanitized[key] = value
-
-        return sanitized
+        if isinstance(params, dict):
+            return {
+                k: (
+                    self._redact(v)
+                    if any(h in str(k).lower() for h in self._SENSITIVE_KEY_HINTS)
+                    else self._sanitize_params(v)
+                )
+                for k, v in params.items()
+            }
+        if isinstance(params, (list, tuple)):
+            return type(params)(self._sanitize_params(item) for item in params)
+        # 标量原样返回
+        return params
 
     def _store_log(self, audit_log: AuditLog):
         """存储日志"""

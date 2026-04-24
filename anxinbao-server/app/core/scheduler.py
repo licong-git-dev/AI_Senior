@@ -17,6 +17,11 @@ try:
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
     from apscheduler.jobstores.memory import MemoryJobStore
+    from apscheduler.events import (
+        EVENT_JOB_ERROR,
+        EVENT_JOB_MISSED,
+        EVENT_JOB_MAX_INSTANCES,
+    )
     SCHEDULER_AVAILABLE = True
 except ImportError:
     SCHEDULER_AVAILABLE = False
@@ -30,24 +35,65 @@ class TaskScheduler:
         self.enabled = SCHEDULER_AVAILABLE
         self.scheduler = None
         self._started = False
+        # 任务执行计数（错过/失败/超额），便于运维和 Prometheus 拉取
+        self.metrics = {"jobs_errored": 0, "jobs_missed": 0, "jobs_max_instances": 0}
 
         if self.enabled:
             jobstores = {
                 'default': MemoryJobStore()
             }
+            # 全局 job defaults：单任务异常不影响其他；过期 5 分钟内仍可补跑；
+            # 单任务最多 1 个并发实例（避免重复推送 / 写入冲突）
+            job_defaults = {
+                "coalesce": True,
+                "misfire_grace_time": 300,
+                "max_instances": 1,
+            }
             self.scheduler = AsyncIOScheduler(
                 jobstores=jobstores,
-                timezone="Asia/Shanghai"
+                timezone="Asia/Shanghai",
+                job_defaults=job_defaults,
             )
+
+    # ===== 任务异常监听器 =====
+    # APScheduler 默认对 job 抛异常仅 log，不会让 scheduler 死，但运维看不到。
+    # 这里把异常 / 错过 / 超额并发统一记到本对象 metrics 里，
+    # 下游 Prometheus 中间件能 pull 出来（参见 app/core/metrics.py）。
+
+    def _on_job_error(self, event):
+        self.metrics["jobs_errored"] += 1
+        logger.exception(
+            f"[scheduler] 定时任务异常: job_id={event.job_id} "
+            f"scheduled_run_time={event.scheduled_run_time} "
+            f"exception={event.exception}"
+        )
+
+    def _on_job_missed(self, event):
+        self.metrics["jobs_missed"] += 1
+        logger.warning(
+            f"[scheduler] 定时任务错过执行（超过 misfire_grace_time）: "
+            f"job_id={event.job_id} scheduled_run_time={event.scheduled_run_time}"
+        )
+
+    def _on_job_max_instances(self, event):
+        self.metrics["jobs_max_instances"] += 1
+        logger.warning(
+            f"[scheduler] 定时任务并发达到上限被跳过: job_id={event.job_id}"
+        )
 
     def start(self):
         """启动调度器"""
         if not self.enabled or self._started:
             return
 
+        # 注册异常监听器（必须在 start 之前或之后立即注册）
+        self.scheduler.add_listener(self._on_job_error, EVENT_JOB_ERROR)
+        self.scheduler.add_listener(self._on_job_missed, EVENT_JOB_MISSED)
+        self.scheduler.add_listener(self._on_job_max_instances, EVENT_JOB_MAX_INSTANCES)
+
         self.scheduler.start()
         self._started = True
-        logger.info("任务调度器已启动")
+        logger.info("任务调度器已启动（含异常监听器）")
 
     def shutdown(self):
         """关闭调度器"""
@@ -156,7 +202,7 @@ class ProactiveCareScheduler:
                         # 存储为系统消息
                         await conversation_store.add_message(
                             user_id=str(user.id),
-                            session_id=f'proactive-{datetime.now().strftime('%Y%m%d')}',
+                            session_id=f"proactive-{datetime.now().strftime('%Y%m%d')}",
                             role='assistant',
                             content=message,
                             metadata={'type': 'proactive_care', 'trigger': 'morning_greeting'}
@@ -187,7 +233,7 @@ class ProactiveCareScheduler:
 
                     await conversation_store.add_message(
                         user_id=str(user.id),
-                        session_id=f'reminder-{datetime.now().strftime('%Y%m%d')}',
+                        session_id=f"reminder-{datetime.now().strftime('%Y%m%d')}",
                         role='assistant',
                         content=reminder_message,
                         metadata={"type": "medication_reminder"}
@@ -235,7 +281,7 @@ class ProactiveCareScheduler:
                     if message:
                         await conversation_store.add_message(
                             user_id=str(user.id),
-                            session_id=f'proactive-{datetime.now().strftime('%Y%m%d')}',
+                            session_id=f"proactive-{datetime.now().strftime('%Y%m%d')}",
                             role='assistant',
                             content=message,
                             metadata={'type': 'proactive_care', 'trigger': 'evening_check'}
@@ -317,7 +363,7 @@ class ProactiveCareScheduler:
                             if message:
                                 await conversation_store.add_message(
                                     user_id=str(user.id),
-                                    session_id=f'special-{datetime.now().strftime('%Y%m%d')}',
+                                    session_id=f"special-{datetime.now().strftime('%Y%m%d')}",
                                     role='assistant',
                                     content=message,
                                     metadata={'type': 'special_day', 'event': event}

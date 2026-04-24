@@ -61,6 +61,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: 依赖安全审计（pip-audit · 仅警告，不阻断）
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --desc || \
+            echo "::warning::存在已知 CVE 或扫描失败，请尽快修复（不阻断 CI）"
+        continue-on-error: true
+
       - name: 验证 strict 模式真能拦截"无真实凭据的生产配置"
         env:
           DEBUG: "false"

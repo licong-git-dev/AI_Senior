@@ -27,6 +27,7 @@ help:
 	@echo "  make test          — 跑 pytest（后端）"
 	@echo "  make lint          — 跑 flake8 + eslint"
 	@echo "  make doctor        — 综合诊断（依赖、Git、env）"
+	@echo "  make audit         — 依赖安全审计（SCA · pip-audit / safety）"
 	@echo "  make clean         — 清理 __pycache__ / .pytest_cache / dist"
 	@echo ""
 	@echo "提示：所有命令均在仓库根执行。子任务的 working directory 已自动切换。"
@@ -59,6 +60,12 @@ test-fast:
 .PHONY: coverage
 coverage:
 	@cd $(SERVER_DIR) && pytest --cov=app --cov-report=term-missing --cov-report=html
+
+.PHONY: audit
+audit:
+	@echo "→ 依赖安全审计（SCA）"
+	@cd $(SERVER_DIR) && bash scripts/security_audit.sh || \
+	  (echo ""; echo "⚠️  审计未通过或工具未装；详见 scripts/security_audit.sh 顶部说明"; exit 0)
 
 .PHONY: lint
 lint: lint-py lint-ts

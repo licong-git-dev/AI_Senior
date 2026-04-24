@@ -8,7 +8,15 @@
 
 ---
 
-## r7 — `<pending>` · devx + ErrorBoundary + 文档与残骸清理
+## r8 — `<pending>` · 5 项纵深安全审计
+
+- **🛡️ FF auth 限流补齐**：[`/device/login`](anxinbao-server/app/api/auth.py) 加 5/min（防设备 secret 暴力破解）；[`/device/bind`](anxinbao-server/app/api/auth.py) 加 10/min（防恶意枚举有效设备 ID）
+- **🛡️ GG audit_service 脱敏加强**：[`_sanitize_params`](anxinbao-server/app/services/audit_service.py) 改为递归处理 dict/list/tuple；黑名单扩展到 PII（手机/身份证/地址/银行卡）+ 健康敏感（病例/诊断/处方）；`details/old_value/new_value` 三字段也强制脱敏（历史漏洞：调用方塞进整个 user dict 会原文落库）；占位改为 `***REDACTED(len=N)***` 保留长度便于排错
+- **🛡️ HH scheduler 异常监听器**：注册 `EVENT_JOB_ERROR/MISSED/MAX_INSTANCES` 监听器，单任务异常计入 `metrics` 并打印；`job_defaults` 加 `coalesce=True / misfire_grace_time=300 / max_instances=1`，避免重复推送 / 写入冲突
+- **🛡️ II 依赖 SCA**：新增 [`scripts/security_audit.sh`](anxinbao-server/scripts/security_audit.sh)（pip-audit 优先 / safety 备选 / 都没装给安装指引）；Makefile 加 `make audit`；CI 模板加 pip-audit 步骤（`continue-on-error`，仅警告不阻断）
+- **🛡️ JJ PWA service worker 重写**：v1 → v2，`CACHE_NAME` 显式版本化；HTML 入口 network-first 避免老人卡旧 UI；新增 `NO_CACHE_PREFIXES`（`/api/`、`/sw.js`、`/health`、`/metrics` 都不缓存）；非 GET 请求一律不缓存；`MAX_CACHE_ITEMS=60` LRU 裁剪保护老人设备空间；离线 API 兜底响应改为 503 + 友好 hint；新增 `SKIP_WAITING` 消息让前端可强制更新
+
+## r7 — [`6fe38bf`](https://github.com/licong-git-dev/AI_Senior/commit/6fe38bf) · devx + ErrorBoundary + 文档与残骸清理
 
 - **🛡️ 前端**：新增 [`ErrorBoundary`](anxinbao-pwa/src/components/ErrorBoundary.tsx) 全局错误边界，杜绝白屏崩溃；适老化"出问题了"页面（大字号 + 重试/回首页按钮）
 - **🔧 支付**：[`payment_service.py`](anxinbao-server/app/services/payment_service.py) 去掉 `'test_private_key'` 等硬编码 fallback；新增 `_credentials_ready()` 显式判定 + 生产环境凭据缺失直接拒绝走签名链路

@@ -28,6 +28,17 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v4 增量（第八轮 · 纵深安全审计）
+
+| 模块 | v3 | v4 | 变化 |
+|---|---|---|---|
+| auth `/device/login` | 🟡 无限流 | 🟢 5/min（防暴力破解）| [auth.py](anxinbao-server/app/api/auth.py) |
+| auth `/device/bind` | 🟡 无限流 | 🟢 10/min（防设备 ID 枚举）| 同上 |
+| audit_service 脱敏 | 🟡 仅顶层 4 字段 | 🟢 递归 + PII + 健康敏感 + details/old/new | [audit_service.py](anxinbao-server/app/services/audit_service.py) |
+| scheduler 失败容错 | 🟡 默认 log | 🟢 监听器 + metrics + job_defaults | [scheduler.py](anxinbao-server/app/core/scheduler.py) |
+| 依赖 SCA | ❌ 无 | ✅ 脚本 + Makefile + CI 模板 | [security_audit.sh](anxinbao-server/scripts/security_audit.sh) |
+| PWA service worker | 🟡 v1 / 静态 cache 全收 | 🟢 v2 / 显式版本 / NO_CACHE 列表 / LRU | [sw.js](anxinbao-pwa/public/sw.js) |
+
 **v3 后剩余红色就绪度模块：0 个**（v1 起 10 → v2 4 → v3 0）。
 所有曾标红的模块要么真正修好（user.py / admin 鉴权），要么生产环境抛 501（life / integration），要么 _SafeRandom 门控（admin / analytics / ai service）。**整体上线前 P0 = 配齐凭据 + 启用 CI 守卫**，剩下都是 P1 业务深度问题。
 

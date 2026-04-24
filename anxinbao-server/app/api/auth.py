@@ -309,6 +309,7 @@ async def login(
 
 
 @router.post("/device/login", response_model=TokenResponse)
+@limiter.limit("5/minute")  # 防止设备 secret 暴力破解（与 user login 同强度）
 async def device_login(
     body: DeviceLoginRequest,
     request: Request,
@@ -597,6 +598,7 @@ async def register_device(
 
 
 @router.post("/device/bind")
+@limiter.limit("10/minute")  # 防止恶意批量绑定枚举有效设备 ID
 async def bind_device(
     body: DeviceBindRequest,
     request: Request,
