@@ -122,6 +122,35 @@ def _enforce_production_secrets() -> None:
             " 生成方式：python -c 'import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'"
         )
 
+    # ===== CORS 守卫：生产环境拒绝通配符 / localhost / 非 HTTPS =====
+    raw_origins = (settings.allowed_origins or "").strip()
+    if raw_origins == "*":
+        fatal_errors.append(
+            "ALLOWED_ORIGINS=* 在生产环境是严重风险（任意域可发起 credentialed CORS 请求）。"
+            " 请改为具体域名，例如 ALLOWED_ORIGINS=https://anxinbao.com,https://app.anxinbao.com"
+        )
+    else:
+        origins_list = [o.strip() for o in raw_origins.split(",") if o.strip()]
+        if not origins_list:
+            fatal_errors.append("ALLOWED_ORIGINS 不能为空（生产环境必须配置具体的前端域名）")
+        else:
+            bad_origins = []
+            for o in origins_list:
+                ol = o.lower()
+                # 拒绝：localhost / 127. / 0.0.0.0 / 非 https
+                if "localhost" in ol or ol.startswith("http://127.") or ol.startswith("http://0.0.0.0"):
+                    bad_origins.append(f"{o}（本地地址不应出现在生产 CORS 白名单）")
+                elif ol.startswith("http://"):
+                    bad_origins.append(f"{o}（生产环境必须 HTTPS）")
+                elif ol == "*":
+                    bad_origins.append(f"{o}（不允许通配符）")
+            if bad_origins:
+                fatal_errors.append(
+                    "ALLOWED_ORIGINS 含不安全条目：\n      "
+                    + "\n      ".join(bad_origins)
+                    + "\n    生产环境必须全部为 https://your-domain.com 形式"
+                )
+
     if fatal_errors:
         msg = "\n".join(f"  - {e}" for e in fatal_errors)
         logger.error("\n[FATAL] 生产环境启动被拒绝，缺少以下不可妥协的密钥：\n" + msg)

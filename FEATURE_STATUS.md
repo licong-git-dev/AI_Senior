@@ -28,6 +28,15 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v5 增量（第九轮 · 通知韧性 + CORS + 迁移 + Bundle）
+
+| 模块 | v4 | v5 | 变化 |
+|---|---|---|---|
+| notification 推送韧性 | 🟡 单次推送，无 retry | 🟢 retry + DLQ + critical 通知通道全失败时落入死信 | [retry.py](anxinbao-server/app/core/retry.py) [dead_letter.py](anxinbao-server/app/core/dead_letter.py) [notification_service.py](anxinbao-server/app/services/notification_service.py) |
+| CORS 配置安全 | 🟡 默认含 localhost，无生产校验 | 🟢 启动校验：拒 * / localhost / http:// | [main.py](anxinbao-server/main.py) `_enforce_production_secrets` |
+| Alembic 迁移文档 | ❌ 无 | ✅ 详细新人指南 | [DATABASE_MIGRATION.md](anxinbao-server/docs/DATABASE_MIGRATION.md) |
+| 前端 bundle 体积 | 🟡 含未使用 recharts (~120 KB) | 🟢 已移除 + 优化文档 | [package.json](anxinbao-pwa/package.json) [BUNDLE_OPTIMIZATION.md](anxinbao-pwa/docs/BUNDLE_OPTIMIZATION.md) |
+
 ## v4 增量（第八轮 · 纵深安全审计）
 
 | 模块 | v3 | v4 | 变化 |

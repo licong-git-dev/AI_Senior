@@ -8,7 +8,35 @@
 
 ---
 
-## r8 — `<pending>` · 5 项纵深安全审计
+## r9 — `<pending>` · 通知重试+死信 / CORS 守卫 / 迁移文档 / Bundle 减重
+
+- **🛡️ LL+MM 通知重试 + 死信队列**：
+  - 新增 [`app/core/retry.py`](anxinbao-server/app/core/retry.py) 异步重试装饰器（指数退避+抖动+显式 retryable 类）
+  - 新增 [`app/core/dead_letter.py`](anxinbao-server/app/core/dead_letter.py) 死信队列（线程安全 + ERROR 日志 + 计数）
+  - WeChatPusher 的 `_get_access_token` 与 `push` 加 retry（仅命中 httpx.TransportError/TimeoutException）
+  - notification_service.send_notification 中"紧急通知 + 该家属所有通道都失败" → 强制 DLQ critical 记录，运维可追溯
+- **🛡️ NN CORS 启动守卫**：[`_enforce_production_secrets`](anxinbao-server/main.py) 加 CORS 校验：
+  - `*` 通配符 → 拒绝启动
+  - 含 localhost / 127.x / 0.0.0.0 → 拒绝启动
+  - 含 http:// （非 https） → 拒绝启动
+  - 空 → 拒绝启动
+- **📋 OO Alembic 迁移指南**：新增 [`docs/DATABASE_MIGRATION.md`](anxinbao-server/docs/DATABASE_MIGRATION.md)
+  - autogenerate 工作流 + autogenerate 漏检的 4 类场景手写指引
+  - SQLite ALTER 限制与 batch_alter_table 模式
+  - 数据迁移最佳实践（schema 与 drop 分两次 commit）
+  - 多人协作 branch heads 合并
+  - 与 init_db() 的关系 + 生产推荐改 alembic upgrade head
+  - 回滚 SOP
+- **📦 PP 前端 Bundle 减重**：
+  - **移除 recharts**（package.json 在 src/ 零引用，节省 ~120 KB gzip）
+  - 新增 [`anxinbao-pwa/docs/BUNDLE_OPTIMIZATION.md`](anxinbao-pwa/docs/BUNDLE_OPTIMIZATION.md)：
+    - 当前 4 个生产依赖体积估算
+    - 静态审计命令（grep 整包 import / depcheck）
+    - 减重清单按 ROI 排序
+    - 适老化场景下的优先级（首屏 < 3s）
+    - 中文字体子集化方案
+
+## r8 — [`3ab5c56`](https://github.com/licong-git-dev/AI_Senior/commit/3ab5c56) · 5 项纵深安全审计
 
 - **🛡️ FF auth 限流补齐**：[`/device/login`](anxinbao-server/app/api/auth.py) 加 5/min（防设备 secret 暴力破解）；[`/device/bind`](anxinbao-server/app/api/auth.py) 加 10/min（防恶意枚举有效设备 ID）
 - **🛡️ GG audit_service 脱敏加强**：[`_sanitize_params`](anxinbao-server/app/services/audit_service.py) 改为递归处理 dict/list/tuple；黑名单扩展到 PII（手机/身份证/地址/银行卡）+ 健康敏感（病例/诊断/处方）；`details/old_value/new_value` 三字段也强制脱敏（历史漏洞：调用方塞进整个 user dict 会原文落库）；占位改为 `***REDACTED(len=N)***` 保留长度便于排错

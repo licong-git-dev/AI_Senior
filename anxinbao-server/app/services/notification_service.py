@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 import httpx
 
 from app.core.config import get_settings
+from app.core.retry import async_retry
+from app.core.dead_letter import dead_letter_queue, DeadLetterRecord
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -79,6 +81,10 @@ class WeChatPusher(BasePusher):
         self._access_token = None
         self._token_expires_at = None
 
+    @async_retry(
+        max_attempts=3, backoff_base=0.5, max_delay=4.0,
+        retryable=(httpx.TransportError, httpx.TimeoutException),
+    )
     async def _get_access_token(self) -> str:
         """获取微信access_token"""
         if self._access_token and self._token_expires_at and datetime.now() < self._token_expires_at:
@@ -108,6 +114,10 @@ class WeChatPusher(BasePusher):
             logger.error(f'获取微信access_token异常: {e}')
             return None
 
+    @async_retry(
+        max_attempts=3, backoff_base=0.5, max_delay=4.0,
+        retryable=(httpx.TransportError, httpx.TimeoutException),
+    )
     async def push(
         self,
         recipient: str,
@@ -115,7 +125,7 @@ class WeChatPusher(BasePusher):
         content: str,
         data: Optional[Dict] = None
     ) -> bool:
-        """发送微信模板消息"""
+        """发送微信模板消息（瞬时网络异常会重试 3 次，不可用配置直接返回 False）"""
         if not self.app_id or not self.app_secret:
             logger.warning('微信推送未配置')
             return False
@@ -314,8 +324,15 @@ class NotificationService:
                     if primary:
                         recipients = primary
 
+                # 紧急模板需要"任一通道成功 = 该家属成功"的逻辑
+                # （而不是"所有通道都失败才记 dead letter"），便于运维定位"谁没收到"
+                is_critical = template == NotificationTemplate.EMERGENCY
+
                 # 向每个家属发送通知
                 for family in recipients:
+                    family_any_success = False
+                    family_failed_channels: List[Dict[str, Any]] = []
+
                     for channel in template_config['channels']:
                         pusher = self.pushers.get(channel)
                         if not pusher:
@@ -326,13 +343,25 @@ class NotificationService:
                         if not recipient:
                             continue
 
-                        # 发送推送
-                        success = await pusher.push(
-                            recipient=recipient,
-                            title=template_config['title'],
-                            content=content,
-                            data=extra_data
-                        )
+                        # 发送推送（pusher.push 内部已带 retry；这里再补 try/except
+                        # 是为了把"重试用尽仍失败"统一翻译为 success=False）
+                        try:
+                            success = await pusher.push(
+                                recipient=recipient,
+                                title=template_config['title'],
+                                content=content,
+                                data=extra_data
+                            )
+                        except Exception as exc:
+                            logger.error(
+                                f"通道 {channel.value} 推送异常（重试用尽）: "
+                                f"family={family.id} err={exc}"
+                            )
+                            success = False
+                            family_failed_channels.append({
+                                "channel": channel.value,
+                                "error": str(exc),
+                            })
 
                         result_detail = {
                             'family_id': family.id,
@@ -344,8 +373,31 @@ class NotificationService:
 
                         if success:
                             results['sent_count'] += 1
+                            family_any_success = True
                         else:
                             results["failed_count"] += 1
+                            family_failed_channels.append({
+                                "channel": channel.value,
+                                "error": "push returned False",
+                            })
+
+                    # 紧急通知 + 该家属所有通道都失败 → 死信记录 + ERROR 日志
+                    # （健康告警等非紧急通知失败不入 DLQ，避免噪音）
+                    if is_critical and not family_any_success:
+                        dead_letter_queue.record(DeadLetterRecord(
+                            channel="multi",
+                            recipient=str(family.id),
+                            template=template.value,
+                            payload={
+                                "user_id": user_id,
+                                "family_name": family.name,
+                                "content": content[:200],
+                                "failed_channels": family_failed_channels,
+                            },
+                            error="所有通道均失败",
+                            severity="critical",
+                            attempts=len(template_config['channels']),
+                        ))
 
                 # 记录通知日志
                 await self._log_notification(
