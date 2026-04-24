@@ -8,7 +8,48 @@
 
 ---
 
-## r10 — `<pending>` · DLQ UI + 4 个集成守卫 + health 拓展 + 审计权限收敛 + manifest
+## r11 — `<pending>` · 数字生命陪伴 Phase 1 alpha · 完整 4 阶段 RFC 与骨架
+
+🚀 **战略转向**：从"工具型应用" → "AI 数字生命陪伴"。本轮交付完整 4 阶段架构 RFC + Phase 1 骨架 + 风险与成本评估。所有新代码 alpha 状态，由 `COMPANION_ENABLED=true` 显式开启，**不破坏现有 `/api/chat`**。
+
+### 文档（3 份）
+- [`docs/DIGITAL_COMPANION_RFC.md`](anxinbao-server/docs/DIGITAL_COMPANION_RFC.md) — 4 阶段架构主文档（行业锚定 / 差距分析 / 路线图 / 安全护栏 / 评审流程）
+- [`docs/DIGITAL_COMPANION_COST.md`](anxinbao-server/docs/DIGITAL_COMPANION_COST.md) — 成本模型（Phase 1+2 ¥19/月、Phase 4 完整体 ¥45-81/月、三档套餐建议）
+- [`docs/DIGITAL_COMPANION_RISKS.md`](anxinbao-server/docs/DIGITAL_COMPANION_RISKS.md) — 4 项 P0 + 6 项 P1 + 合规清单 + kill switch
+
+### 服务层骨架（11 个新文件）
+- [`app/services/persona.py`](anxinbao-server/app/services/persona.py) — `AnxinbaoPersona` 不可变人格（性格五项 / 口头禅 / 禁忌 / 必做 / 必不说）+ `build_system_prompt()`
+- [`app/services/memory_engine.py`](anxinbao-server/app/services/memory_engine.py) — SQLite 长期记忆引擎，5 类记忆（fact/preference/relation/event/mood）+ 关键词召回 + 时间衰减打分；MemoryVisibility 三级（self_only/family/never_share）防止隐私泄漏
+- [`app/services/companion_tools.py`](anxinbao-server/app/services/companion_tools.py) — function calling 工具池（9 个工具，4 级安全）；与 Anthropic Tool Use 格式兼容
+- [`app/services/agents/`](anxinbao-server/app/services/agents/) 包：
+  - `base.py` — `BaseAgent` + `AgentReport` 统一汇报结构 + 异常兜底
+  - `hermes.py` — 协调者 / 唯一对外人格；当前降级到 qwen_service
+  - `health_agent.py` — 健康监控（规则引擎，无 LLM）
+  - `social_agent.py` — 家庭关系图谱
+  - `memory_agent.py` — 长期记忆管理 + 心境聚合
+  - `safety_agent.py` — SOS / 跌倒 / 长时间静默
+  - `schedule_agent.py` — 用药 / 服务 / 出行规划
+
+### API 层
+- [`app/api/companion.py`](anxinbao-server/app/api/companion.py) — `/api/companion/*`：
+  - `GET /persona` 查看人格配置
+  - `POST /chat` 与数字生命对话（骨架版，降级到 qwen_service）
+  - `GET /memory/stats` 记忆统计
+  - `GET /memory/list` 列出记忆
+  - `POST /memory/save` 写入记忆
+  - `DELETE /memory/{id}` 老人主动忘记
+  - `DELETE /memory/all/clear?confirm=true` GDPR 一键清空
+  - `GET /tools` 列出可用工具池
+- [`main.py`](anxinbao-server/main.py) 注册 router；新增 `_ALPHA_ROUTERS_HIDE_IN_PROD={"companion"}` 在生产 OpenAPI 隐藏（即便启用也不让普通用户发现）
+
+### 安全设计（贯穿）
+- 默认关闭：`COMPANION_ENABLED=false`；启用还需运维显式设置
+- 老人对 AI 倾诉默认 `SELF_ONLY`，永不暴露给家属
+- 老人随时可一键删除全部记忆
+- LLM 不直答健康/用药建议（必经规则引擎）
+- 与现有 `/api/chat` 完全并行，零破坏
+
+## r10 — [`ddda28d`](https://github.com/licong-git-dev/AI_Senior/commit/ddda28d) · DLQ UI + 4 个集成守卫 + health 拓展 + 审计权限收敛 + manifest
 
 - **🛡️ RR DLQ 端点**：[`/api/admin/dlq`](anxinbao-server/app/api/admin.py) GET 列表（按 channel/severity 过滤、limit 1-500）+ POST `/dlq/clear` 清空（须 confirm=true）；两端点都受 admin 强鉴权 + 审计日志记录
 - **🛡️ SS integration_service 4 个新守卫**：除已有的 `sync_medical_records` / `sync_device_data`，再加：

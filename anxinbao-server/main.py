@@ -63,6 +63,7 @@ from app.api.memory_api import router as memory_api_router
 from app.api.drug_api import router as drug_api_router
 from app.api.cognitive_api import router as cognitive_api_router
 from app.api.daily_report import router as daily_report_router
+from app.api.companion import router as companion_router  # Alpha · 数字生命陪伴 (Phase 1)
 from app.models.database import init_db, engine
 from app.core.config import get_settings
 from app.core.logging import setup_logging, RequestLoggingMiddleware
@@ -528,11 +529,16 @@ templates = Jinja2Templates(directory="templates")
 # 避免攻击者通过 /docs 探测到内部数据结构、避免投资人/合伙人误以为这些功能可用。
 # 路由本身保留（向后兼容已存在的客户端），仅从文档中隐藏 + 由路由层各自做 410/0 处理。
 _RED_ROUTERS_HIDE_IN_PROD = {"users", "admin", "analytics", "ai"}
+# Alpha 路由：默认在生产 OpenAPI 隐藏（即便 COMPANION_ENABLED=true）
+# 避免投资人 / 普通用户误以为这些已上线。运维可在反代层显式开放。
+_ALPHA_ROUTERS_HIDE_IN_PROD = {"companion"}
 
 
 def _include_router_safely(router_obj, *, name: str = "") -> None:
-    """生产环境：对红色就绪度模块统一加 include_in_schema=False"""
-    if not settings.debug and name in _RED_ROUTERS_HIDE_IN_PROD:
+    """生产环境：对红色就绪度模块统一加 include_in_schema=False；alpha 同样"""
+    if not settings.debug and (
+        name in _RED_ROUTERS_HIDE_IN_PROD or name in _ALPHA_ROUTERS_HIDE_IN_PROD
+    ):
         app.include_router(router_obj, include_in_schema=False)
     else:
         app.include_router(router_obj)
@@ -586,6 +592,7 @@ app.include_router(memory_api_router)  # 情感记忆系统
 app.include_router(drug_api_router)  # 药品识别模块
 app.include_router(cognitive_api_router)  # 认知训练模块
 app.include_router(daily_report_router)  # 今日爸妈-子女安心日报
+_include_router_safely(companion_router, name="companion")  # Alpha · 数字生命陪伴 (Phase 1)
 
 # 注册监控路由
 app.include_router(create_metrics_endpoint())

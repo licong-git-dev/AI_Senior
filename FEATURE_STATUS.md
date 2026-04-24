@@ -28,6 +28,23 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v7 增量（第十一轮 · 数字生命陪伴 Phase 1 alpha）
+
+⚠️ 本轮是**战略级新增**而非修复 —— 在不破坏现有任何功能前提下，引入"AI 数字生命"模式作为长期演进方向。
+
+| 模块 | v6 | v7 | 备注 |
+|---|---|---|---|
+| 数字生命人格 | ❌ | 🟡 alpha 骨架 | [persona.py](anxinbao-server/app/services/persona.py) `AnxinbaoPersona` 不可变配置 |
+| 长期记忆引擎 | ❌ | 🟡 alpha SQLite | [memory_engine.py](anxinbao-server/app/services/memory_engine.py) 5 类记忆 + 关键词召回 + 隐私分级 |
+| Function Calling 工具池 | ❌ | 🟡 alpha schema | [companion_tools.py](anxinbao-server/app/services/companion_tools.py) 9 工具 / 4 级安全 |
+| 多智能体 (Hermes) | ❌ | 🟡 alpha 骨架 | [agents/](anxinbao-server/app/services/agents/) Hermes + 5 专业 agent |
+| `/api/companion/*` 端点 | ❌ | 🟡 alpha (env 开关) | [companion.py](anxinbao-server/app/api/companion.py) 默认关闭 |
+| 完整 4 阶段架构 RFC | ❌ | ✅ 已就绪 | [DIGITAL_COMPANION_RFC.md](anxinbao-server/docs/DIGITAL_COMPANION_RFC.md) |
+| 成本模型 | ❌ | ✅ 已就绪 | [COST.md](anxinbao-server/docs/DIGITAL_COMPANION_COST.md) |
+| 风险与合规 | ❌ | ✅ 已就绪 | [RISKS.md](anxinbao-server/docs/DIGITAL_COMPANION_RISKS.md) |
+
+**安全设计**：所有新代码默认关闭（`COMPANION_ENABLED=false`），启用后生产环境仍从 OpenAPI schema 隐藏。零破坏。
+
 ## v6 增量（第十轮 · DLQ UI + 集成守卫 + health 拓展 + 审计权限 + manifest）
 
 | 模块 | v5 | v6 | 变化 |
