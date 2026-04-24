@@ -706,19 +706,46 @@ async def get_audit_logs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     action: Optional[str] = None,
+    user_id: Optional[str] = Query(None, description="按用户 ID 过滤；普通用户只能传自己的"),
     current_user: UserInfo = Depends(get_current_user),
     db=Depends(get_db)
 ):
     """
-    获取审计日志（仅管理员）
+    获取审计日志（按角色作用域）。
+
+    权限模型（修复 r10：原版本任意 admin 可查全量是合规风险）：
+    - super_admin / admin（含 admin_service 注册）：可查全量；可按 user_id 过滤
+    - elder / family / device：仅可查自己（current_user.user_id）的审计日志
+    - 未授权角色：403
+
+    审计日志含 PII / 业务敏感数据，全员可见会造成隐私泄漏。
     """
-    if current_user.role != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="仅管理员可查看审计日志"
-        )
+    role = current_user.role or ""
+    is_privileged = role in {"admin", "super_admin"}
+
+    # 二次校验：admin 角色还需在 admin_service 注册（防 token 伪造）
+    if is_privileged and role == "admin":
+        try:
+            from app.services.admin_service import admin_service
+            if not admin_service.get_admin(int(current_user.user_id)):
+                is_privileged = False
+        except (ValueError, TypeError):
+            is_privileged = False
 
     query = db.query(AuditLog)
+
+    if is_privileged:
+        # 全量查看；按可选 user_id 过滤
+        if user_id:
+            query = query.filter(AuditLog.user_id == user_id)
+    else:
+        # 普通用户只能查自己；显式 user_id 必须等于自己
+        if user_id and user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="普通用户只能查询自己的审计日志",
+            )
+        query = query.filter(AuditLog.user_id == current_user.user_id)
 
     if action:
         query = query.filter(AuditLog.action == action)
@@ -732,6 +759,7 @@ async def get_audit_logs(
         'total': total,
         'page': page,
         'page_size': page_size,
+        'scope': "all" if is_privileged else "self",
         'logs': [
             {
                 'id': log.id,

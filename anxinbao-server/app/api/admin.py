@@ -518,6 +518,86 @@ async def set_announcement(
     }
 
 
+# ==================== 死信队列（DLQ）查看与维护 ====================
+
+@router.get("/dlq")
+async def list_dead_letters(
+    channel: Optional[str] = Query(None, description="按通道筛选: wechat / sms / app_push / multi / payment_callback"),
+    severity: Optional[str] = Query(None, description="按级别筛选: info / warning / critical"),
+    limit: int = Query(100, ge=1, le=500, description="最多返回多少条"),
+    admin: dict = Depends(verify_admin),
+):
+    """
+    查看死信队列（推送 / 通知 / 支付回调 等关键消息重试用尽后的失败档案）。
+
+    用途：运维 / 客服可在此 UI 看到"哪些 SOS 通知没送到家属"、"哪些紧急
+    短信发不出去"，做人工补偿（例如直接打电话）。
+
+    DLQ 由 [`app/core/dead_letter.py`](anxinbao-server/app/core/dead_letter.py) 维护，当前是内存实现，
+    服务重启后会清空 — 计划后续迁移到 DB 表（DeadLetter）。
+    """
+    from app.core.dead_letter import dead_letter_queue
+    items = dead_letter_queue.list(channel=channel, severity=severity, limit=limit)
+
+    # log this admin action for audit
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action="view_dlq",
+        resource_type='dlq',
+        resource_id=channel or "all",
+        details={'severity': severity, 'limit': limit, 'count': len(items)},
+    )
+
+    return {
+        "total_in_memory": dead_letter_queue.size(),
+        "channel_counts": dead_letter_queue.counts,
+        "filtered_count": len(items),
+        "items": [
+            {
+                "channel": r.channel,
+                "recipient": r.recipient,
+                "template": r.template,
+                "payload": r.payload,
+                "error": r.error,
+                "severity": r.severity,
+                "occurred_at": r.occurred_at,
+                "attempts": r.attempts,
+            }
+            for r in items
+        ],
+    }
+
+
+@router.post("/dlq/clear")
+async def clear_dead_letters(
+    confirm: bool = Query(False, description="必须传 confirm=true 才执行清空，避免误操作"),
+    admin: dict = Depends(verify_admin),
+):
+    """
+    清空死信队列（运维确认人工补偿完成后调用）。
+
+    必须传 confirm=true 才会执行。审计日志会记录管理员 ID + 清空数量。
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="需要确认操作：在 query 中传 confirm=true",
+        )
+
+    from app.core.dead_letter import dead_letter_queue
+    cleared = dead_letter_queue.clear()
+
+    admin_service.audit_log.log_action(
+        admin_id=admin['admin_id'],
+        action="clear_dlq",
+        resource_type='dlq',
+        resource_id="all",
+        details={'cleared_count': cleared},
+    )
+
+    return {'success': True, 'cleared_count': cleared}
+
+
 @router.post("/system/maintenance")
 async def toggle_maintenance(
     enabled: bool = Query(..., description="是否开启维护模式"),

@@ -28,6 +28,16 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v6 增量（第十轮 · DLQ UI + 集成守卫 + health 拓展 + 审计权限 + manifest）
+
+| 模块 | v5 | v6 | 变化 |
+|---|---|---|---|
+| DLQ 运维入口 | ❌ | 🟢 `/api/admin/dlq` GET/POST | [admin.py](anxinbao-server/app/api/admin.py) |
+| integration_service 守卫覆盖 | 🟡 仅 2 个守卫 | 🟢 6 个守卫（医疗记录/设备读数/挂号/配对/订单/理赔）| [integration_service.py](anxinbao-server/app/services/integration_service.py) |
+| `/health/integrations` | 🟡 仅凭据 | 🟢 + CORS + DLQ + scheduler metrics | [main.py](anxinbao-server/main.py) |
+| audit-logs 权限作用域 | 🔴 任意 admin 可查全量 | 🟢 super_admin 全量 / 其他仅自己 + 防 token 伪造 | [auth.py](anxinbao-server/app/api/auth.py) |
+| PWA manifest | 🟡 基础 | 🟢 优化 + maskable + shortcuts + 配套文档 | [manifest.json](anxinbao-pwa/public/manifest.json) [PWA_MANIFEST.md](anxinbao-pwa/docs/PWA_MANIFEST.md) |
+
 ## v5 增量（第九轮 · 通知韧性 + CORS + 迁移 + Bundle）
 
 | 模块 | v4 | v5 | 变化 |

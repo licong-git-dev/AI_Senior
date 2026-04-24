@@ -8,7 +8,29 @@
 
 ---
 
-## r9 — `<pending>` · 通知重试+死信 / CORS 守卫 / 迁移文档 / Bundle 减重
+## r10 — `<pending>` · DLQ UI + 4 个集成守卫 + health 拓展 + 审计权限收敛 + manifest
+
+- **🛡️ RR DLQ 端点**：[`/api/admin/dlq`](anxinbao-server/app/api/admin.py) GET 列表（按 channel/severity 过滤、limit 1-500）+ POST `/dlq/clear` 清空（须 confirm=true）；两端点都受 admin 强鉴权 + 审计日志记录
+- **🛡️ SS integration_service 4 个新守卫**：除已有的 `sync_medical_records` / `sync_device_data`，再加：
+  - `book_appointment`（伪挂号会让老人到现场没号，是医疗事故源）
+  - `pair_device`（不做 BLE 握手就标 ONLINE，血压数据永不到）
+  - `create_order`（社区服务订单只本地存储，社区方不知道）
+  - `submit_claim`（保险理赔仅本地状态变更，保险公司无记录）
+- **🛡️ TT `/health/integrations` 拓展**：新增 `cors` 检查项（含 issues 列表）+ `dead_letter_queue`（size + critical_count + counts_by_channel + blocking_production）+ `scheduler.metrics`（jobs_errored/missed/max_instances）；DLQ critical ≥10 也计入 `critical_missing`，作为生产门
+- **🛡️ UU audit-logs 权限收敛**：[`/api/auth/audit-logs`](anxinbao-server/app/api/auth.py) 旧版任意 admin 可查全量是合规风险。新版按角色作用域：
+  - `super_admin` / `admin`（含 `admin_service` 注册）→ 全量 + 可按 user_id 过滤
+  - 其他角色 → 只能查自己；显式传他人 user_id → 403
+  - 防 token 伪造：admin 角色仍要在 admin_service 中注册才放行
+- **📱 VV PWA manifest 优化**：
+  - `start_url=/?source=pwa` 标记 PWA 流量
+  - `scope=/` 显式作用域；`display_override` 桌面 PWA 兼容
+  - `orientation=portrait-primary` 锁定竖屏（老人翻屏易误操作）
+  - `background_color=#1e1b4b` 与 StandbyScreen 深色调对齐，启动不白闪
+  - icons 拆 `any` + `maskable` 两组（旧版 `any maskable` 在 iOS 兼容差）
+  - `shortcuts` 长按桌面图标：SOS / 聊天 / 用药
+  - 配套文档 [`PWA_MANIFEST.md`](anxinbao-pwa/docs/PWA_MANIFEST.md) 含图标资产清单 + 一键生成命令 + index.html 配套 meta tags + 适老化考量
+
+## r9 — [`777d40d`](https://github.com/licong-git-dev/AI_Senior/commit/777d40d) · 通知重试+死信 / CORS 守卫 / 迁移文档 / Bundle 减重
 
 - **🛡️ LL+MM 通知重试 + 死信队列**：
   - 新增 [`app/core/retry.py`](anxinbao-server/app/core/retry.py) 异步重试装饰器（指数退避+抖动+显式 retryable 类）

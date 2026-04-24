@@ -207,7 +207,13 @@ class MedicalIntegrationService:
         preferred_date: datetime,
         doctor: Optional[str] = None
     ) -> Dict[str, Any]:
-        """预约挂号"""
+        """
+        预约挂号（mock；生产环境抛 IntegrationNotImplemented）
+
+        历史问题：直接生成 appointment_id + 随机 queue_number 返回 'confirmed'，
+        老人会以为真预约成功，到现场发现没号。这是潜在医疗事故源。
+        """
+        _enforce_real_integration("MedicalIntegrationService.book_appointment")
         appointment_id = f"apt_{user_id}_{int(datetime.now().timestamp())}"
 
         return {
@@ -326,7 +332,13 @@ class HardwareSDKService:
         model: str,
         mac_address: Optional[str] = None
     ) -> SmartDevice:
-        """配对设备"""
+        """
+        配对设备（mock；生产环境抛 IntegrationNotImplemented）
+
+        历史问题：不做真实 BLE 握手 / 厂商 SDK 配对，立刻 status=ONLINE。
+        前端会以为"已绑定"，但血压数据永远收不到。
+        """
+        _enforce_real_integration("HardwareSDKService.pair_device")
         device_id = f"dev_{user_id}_{device_type.value}_{secrets.token_hex(4)}"
 
         device = SmartDevice(
@@ -575,7 +587,13 @@ class CommunityServiceIntegration:
         contact_phone: str,
         notes: Optional[str] = None
     ) -> Optional[ServiceOrder]:
-        """创建服务订单"""
+        """
+        创建社区服务订单（mock；生产环境抛 IntegrationNotImplemented）
+
+        历史问题：仅 in-memory 存储，没有真实社区服务方派单。
+        家属看到"已下单"但社区那边什么动静都没有。
+        """
+        _enforce_real_integration("CommunityServiceIntegration.create_order")
         service = self.services.get(service_id)
         if not service or not service.available:
             return None
@@ -775,7 +793,13 @@ class InsuranceIntegrationService:
         return claim
 
     def submit_claim(self, claim_id: str, user_id: int) -> bool:
-        """提交理赔"""
+        """
+        提交理赔（mock；生产环境抛 IntegrationNotImplemented）
+
+        历史问题：仅本地状态变更，无真实保险公司 API 调用。
+        老人/家属以为已提交理赔，实际保险公司那边没有任何记录。
+        """
+        _enforce_real_integration("InsuranceIntegrationService.submit_claim")
         claim = self.claims.get(claim_id)
         if not claim or claim.user_id != user_id:
             return False

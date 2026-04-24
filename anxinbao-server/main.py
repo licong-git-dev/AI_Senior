@@ -702,13 +702,82 @@ async def integrations_health():
                 and status != "real":
             critical_missing.append(name)
 
+    # ===== CORS 自检（与 _enforce_production_secrets 同一套规则但只报告不阻断）=====
+    cors_status = "real"
+    cors_issues: list[str] = []
+    raw_origins = (settings.allowed_origins or "").strip()
+    if raw_origins == "*":
+        cors_status = "missing"  # 与"无配置"等价的危险
+        cors_issues.append("ALLOWED_ORIGINS=* 在生产是任意域可发 credentialed 请求")
+    elif not raw_origins:
+        cors_status = "missing"
+        cors_issues.append("ALLOWED_ORIGINS 未配置")
+    else:
+        for o in (x.strip() for x in raw_origins.split(",") if x.strip()):
+            ol = o.lower()
+            if "localhost" in ol or ol.startswith("http://127.") or ol.startswith("http://0.0.0.0"):
+                cors_status = "placeholder"
+                cors_issues.append(f"{o} 是本地地址，不该出现在生产 CORS")
+            elif ol.startswith("http://"):
+                cors_status = "placeholder"
+                cors_issues.append(f"{o} 非 HTTPS")
+
+    # ===== DLQ 状态 =====
+    dlq_size = 0
+    dlq_critical = 0
+    dlq_counts: dict[str, int] = {}
+    try:
+        from app.core.dead_letter import dead_letter_queue
+        dlq_size = dead_letter_queue.size()
+        dlq_counts = dict(dead_letter_queue.counts)
+        dlq_critical = sum(
+            1 for r in dead_letter_queue.list(limit=10000) if r.severity == "critical"
+        )
+    except Exception:
+        pass
+
+    # ===== Scheduler 状态 =====
+    scheduler_metrics: dict[str, int] = {}
+    try:
+        from app.core.scheduler import scheduler as _scheduler
+        scheduler_metrics = dict(_scheduler.metrics)
+    except Exception:
+        pass
+
+    # 把 CORS 加入 results 列表（保持原数组结构，前端不破坏）
+    results.append({
+        "name": "cors",
+        "description": "生产 CORS 白名单（不可含 *、localhost、http://）",
+        "status": cors_status,
+        "production_ready": cors_status == "real",
+        "issues": cors_issues,
+    })
+    if cors_status != "real":
+        critical_missing.append("cors")
+
+    # 把 DLQ critical 也作为生产门：累计 ≥10 条 critical 视为生产不就绪
+    dlq_block = dlq_critical >= 10
+    if dlq_block:
+        critical_missing.append("dead_letter_queue")
+
     return {
         "service": "anxinbao-server",
         "production_ready": len(critical_missing) == 0,
         "critical_missing": critical_missing,
         "integrations": results,
+        "dead_letter_queue": {
+            "size": dlq_size,
+            "critical_count": dlq_critical,
+            "counts_by_channel": dlq_counts,
+            "blocking_production": dlq_block,
+            "note": "critical 累计 ≥10 条视为生产不就绪；运维补偿后调用 POST /api/admin/dlq/clear",
+        },
+        "scheduler": {
+            "metrics": scheduler_metrics,
+            "note": "包含 jobs_errored / jobs_missed / jobs_max_instances（启动以来累计）",
+        },
         "note": (
-            "production_ready=false 表示存在未真实配置的关键链路；"
+            "production_ready=false 表示存在未真实配置的关键链路或 DLQ 堆积；"
             "上线前必须把 critical_missing 全部解决。"
         ),
     }
