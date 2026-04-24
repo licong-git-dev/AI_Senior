@@ -129,6 +129,97 @@ def _check_elder_access(elder_id, current_user, db):
     # device → 只能查绑定老人
 ```
 
+**管理后台必须用强角色守卫**（修复历史"演示目的允许任意登录用户"漏洞，见 `app/api/admin.py::verify_admin`）：
+
+```python
+from app.core.deps import get_current_admin
+
+async def verify_admin(current_user = Depends(get_current_admin)):
+    # JWT.role 必须 == 'admin'，且 admin_service 中确有注册（双重校验防 token 伪造）
+    ...
+```
+
+### 业务 mock 数据的"诚实降级"模式（避免伪 ✅ 上线）
+
+历史上 `admin_service` / `analytics_service` / `ai_service` / `life_service` / `integration_service`
+的"业务指标"全是 `random.randint/uniform` 占位（"50000-60000 用户、500-800 万收入"）。
+两套等价方案：
+
+**A. `_SafeRandom` 模块内重绑定**（适合"真业务逻辑 + 装饰性数值"，如评分/置信度）：
+
+```python
+import random as _real_random
+
+class _SafeRandom:
+    def randint(self, a, b):
+        from app.core.config import get_settings
+        return _real_random.randint(a, b) if get_settings().debug else 0
+    def uniform(self, a, b):
+        from app.core.config import get_settings
+        return _real_random.uniform(a, b) if get_settings().debug else 0.0
+    def choice(self, seq):
+        return _real_random.choice(seq) if seq else None  # 模板抽取是合法用法
+
+random = _SafeRandom()  # 模块内重绑定，所有 random.xxx 自动路由
+```
+
+**B. `*NotImplemented` 异常 + 路由装饰器翻 501**（适合"整个方法都是 mock"，如天气、医疗记录）：
+
+```python
+class LifeServiceNotImplemented(NotImplementedError): pass
+
+def _enforce_real_data_source(feature: str):
+    from app.core.config import get_settings
+    if not get_settings().debug:
+        raise LifeServiceNotImplemented(...)
+
+def get_weather(self, city: str):
+    _enforce_real_data_source("WeatherService.get_weather")
+    # mock 实现仅 DEBUG 模式可达
+```
+
+API 装饰器翻为 HTTP 501（参见 `app/api/life.py::_life_route`）。
+
+### 已废弃端点的下线模式
+
+`/api/users/*` 是范例（见 `app/api/users.py`）。模块顶部声明 `deprecated=True`，
+所有 handler 调用 `_gone()`：
+
+```python
+def _gone():
+    if not settings.debug:
+        raise HTTPException(status_code=410, detail={"deprecated": True, "use_instead": ...})
+    raise HTTPException(status_code=404)  # DEBUG 模式不破坏防御性测试
+```
+
+### 生产环境路由 schema 隔离
+
+🔴 红色就绪度路由（admin/analytics/users/ai 等）在生产模式从 OpenAPI schema 隐藏：
+
+```python
+# main.py
+_RED_ROUTERS_HIDE_IN_PROD = {"users", "admin", "analytics", "ai"}
+
+def _include_router_safely(router_obj, *, name: str = ""):
+    if not settings.debug and name in _RED_ROUTERS_HIDE_IN_PROD:
+        app.include_router(router_obj, include_in_schema=False)
+    else:
+        app.include_router(router_obj)
+```
+
+### 启动安全门
+
+`main.py::_enforce_production_secrets` 在 `DEBUG=False` 时强校验：
+- `JWT_SECRET_KEY` 必须由环境变量显式设置且 ≥ 32 字符（不能用代码 `token_urlsafe` 默认）
+- `ENCRYPTION_KEY` 必须设置
+- 任一不满足 → `SystemExit`
+
+### F-string 嵌套引号（PEP 701 陷阱）
+
+**不要在 f-string 内嵌套同款引号** —— 仅 Python 3.12+ 支持。
+- 反例：`f"\n第{i}条：{news["title"]}"` ❌（旧 Python `SyntaxError`）
+- 正例：`title = news["title"]; f"\n第{i}条：{title}"` ✅
+
 ### 前端 (React + TypeScript + Vite)
 
 **访问模式**通过 URL 参数 `?mode=` 控制，一套代码三个入口：

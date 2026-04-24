@@ -332,7 +332,10 @@ async def get_morning_report(
     """
 
     for i, news in enumerate(briefing['headlines'][:3], 1):
-        report_text += f"\n第{i}条：{news["title"]}"
+        # 注意：避免在 f-string 内嵌套同款引号，PEP 701 仅 3.12+ 支持。
+        # 旧 Python（3.10/3.11）会抛 SyntaxError。
+        title = news["title"]
+        report_text += f"\n第{i}条：{title}"
 
     return {
         'date': briefing['date'],
