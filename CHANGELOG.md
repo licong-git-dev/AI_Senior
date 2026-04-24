@@ -8,7 +8,58 @@
 
 ---
 
-## r13 — `<pending>` · 数字生命陪伴 Phase 2 — "AI 主动开口"
+## r14 — `<pending>` · Phase 3 工具调用真实化 + Phase 2 推送闭环（G + H）
+
+本轮把数字生命推进到"**真能办事** + **真找得到人**"。
+
+### G：Phase 3 工具调用真实化
+**4 个高阶 handler** ([companion_tools.py](anxinbao-server/app/services/companion_tools.py))：
+- `video_call_family` (MEDIUM) → 返回 call_session 描述符；真实信令由 VideoCallPage 承接
+- `book_community_service` (MEDIUM) → 调 integration_service.community.create_order；生产抛 `IntegrationNotImplemented` 时翻译为"意向已记录，24h 内回电"给老人
+- `request_health_advice` (HIGH) → 强制走 `HealthRiskEvaluator` 规则引擎 + URGENT_KEYWORDS 检测 + 必加"请咨询医生"免责
+- `trigger_sos` (CRITICAL) → 调 `emergency_service.trigger_sos` 完整链路（多通道 + DLQ 兜底 r9）
+
+**安全网关** ([companion.py](anxinbao-server/app/api/companion.py))：
+- `POST /api/companion/tools/call` 统一调用入口，按 safety_level 分流
+  - LOW → 直接执行
+  - MEDIUM/CRITICAL → 第一次返回 `confirm_token` + `requires_confirmation=true`
+  - 二次调用带 `confirm_token` 才真正执行（单次有效 + TTL：medium 300s / critical 120s）
+  - HIGH → 直接执行（handler 内已经有规则引擎）
+- `GET /api/companion/confirmations` 拉取待确认
+- `DELETE /api/companion/confirmations/{id}` 老人取消（防误触）
+
+**持久化** ([proactive_engagement.py](anxinbao-server/app/services/proactive_engagement.py))：新增 `pending_confirmations` 表 + 完整的 `create / get / consume / list` API。跨用户越权校验。
+
+### H：Phase 2 推送闭环
+- `_push_proactive()` 调 `notification_service.send_notification` 走极光 / 微信模板
+- 推送内容**隐私优先**：标题固定"安心宝来消息了"、正文 ≤40 字摘要 + "…"、完整文本留在收件箱
+- 失败由 r9 的 retry + DLQ 兜底（不再重复实现）
+- 新字段 `push_proactive`（DND 配置中，默认 true）：老人可一键关闭所有主动推送
+- `proactive_messages` 表加 `pushed` 列防重复推送
+
+### 前端 Alpha 预览拓展 ([CompanionPreview.tsx](anxinbao-pwa/src/pages/CompanionPreview.tsx))
+- **待确认操作**卡片（仅有 pending 时展示）：
+  - MEDIUM 琥珀色 / CRITICAL 红色
+  - 展示 tool_name + params + 过期时间
+  - "确认"按钮：弹 window.confirm 二次确认（CRITICAL 更严厉措辞），成功后走 `/tools/call` 带 token
+  - "取消"按钮：一键废掉，防误触
+- `refreshInbox()` 同时刷新 proactive + confirmations，保持 UI 一致
+
+### 单元测试（8 个新 case · [test_companion_safety_gate.py](anxinbao-server/tests/unit/test_companion_safety_gate.py)）
+- confirm_token CRUD
+- 跨用户越权防护（用户 2 不能拿 / 消费用户 1 的 confirm）
+- 单次有效性（二次消费失败）
+- TTL 过期（ttl=0 立即过期）
+- list_pending 按用户隔离
+- push_proactive 默认 + upsert 部分字段不覆盖
+
+### Phase 进度
+- ✅ Phase 1 (r11-r12)：持久人格 + 长期记忆
+- ✅ Phase 2 (r13-r14)：主动开口 + **推送闭环**
+- ✅ Phase 3 (r14)：**9/9 工具 handler 全绑定** + 安全网关 + 二次确认
+- 🟡 Phase 4：多 agent 真实编排（待）
+
+## r13 — [`089f61a`](https://github.com/licong-git-dev/AI_Senior/commit/089f61a) · 数字生命陪伴 Phase 2 — "AI 主动开口"
 
 承接 r12 Phase 1 实施完成，本轮启动 Phase 2：让安心宝从"被动等待" → "主动开口"。
 仍在 `COMPANION_ENABLED=true` 门控后，零破坏现有功能。

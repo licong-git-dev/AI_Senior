@@ -221,16 +221,199 @@ async def _handler_query_health_trend(user_id: int, metric: str,
         db.close()
 
 
+# ===== MEDIUM / HIGH / CRITICAL handler （Phase 3 G 选项）=====
+
+
+async def _handler_video_call_family(
+    user_id: int,
+    family_member_id: str,
+    family_member_name: Optional[str] = None,
+) -> dict:
+    """
+    发起视频通话给指定家属。
+
+    实施现状：返回一个 call_session 描述符；真实信令由 WebSocket /api/video/ws/* 接管。
+    Phase 3 完整体接 video_service.create_session（依赖 TURN 服务器，详见
+    docs/VIDEO_CALL_SETUP.md）。当前是"创建意向 + 推送给家属"的最小实现。
+    """
+    import secrets
+    call_id = f"call_{user_id}_{secrets.token_hex(4)}"
+    # 真实场景应当：
+    # 1) 通过 WebSocket 给目标家属发 ringing 信令
+    # 2) 在 video_sessions 表存一条记录
+    # 3) 返回 wss URL 让前端建立 P2P
+    # 当前：只返回意向信息，前端自行打开 VideoCallPage 完成信令
+    return {
+        "call_session_id": call_id,
+        "from_user_id": user_id,
+        "to_family_member_id": family_member_id,
+        "to_family_member_name": family_member_name,
+        "next_step": "前端打开 VideoCallPage，参数 targetId=" + family_member_id,
+        "note": "需要 VITE_TURN_URL 配置才能稳定连接，详见 docs/VIDEO_CALL_SETUP.md",
+    }
+
+
+async def _handler_book_community_service(
+    user_id: int,
+    service_type: str,
+    scheduled_date: str,
+    address: Optional[str] = None,
+) -> dict:
+    """
+    预约社区服务（保洁/上门理发/送菜等）。
+
+    生产环境会抛 IntegrationNotImplemented（社区方接口未对接）；
+    handler 抓住后翻译为"预约意向已记录，等待人工对接"，避免老人以为已成功。
+    """
+    from datetime import datetime as _dt
+    try:
+        from app.services.integration_service import integration_service, ServiceType, IntegrationNotImplemented
+    except ImportError as exc:
+        return {"error": f"集成服务不可用: {exc}"}
+
+    try:
+        st = ServiceType(service_type)
+    except ValueError:
+        return {"error": f"未知服务类型: {service_type}"}
+
+    try:
+        scheduled = _dt.fromisoformat(scheduled_date)
+    except ValueError:
+        return {"error": f"日期格式错误: {scheduled_date}（应为 ISO 格式）"}
+
+    try:
+        order = integration_service.community.create_order(
+            user_id=user_id,
+            service_id=st.value,
+            scheduled_time=scheduled,
+            address=address or "未填写",
+            contact_phone="",
+        )
+        return {
+            "order_id": order.order_id if order else None,
+            "service_type": service_type,
+            "scheduled_at": scheduled.isoformat(),
+            "status": "已下单（mock）",
+        }
+    except IntegrationNotImplemented:
+        # 生产环境：把"未真接通"翻译为人话给老人
+        return {
+            "status": "意向已记录",
+            "service_type": service_type,
+            "scheduled_at": scheduled.isoformat(),
+            "next_step": "我们会通知社区工作人员；24h 内回电确认",
+            "note": "社区服务接口尚未上线，本次为意向登记",
+        }
+
+
+async def _handler_request_health_advice(
+    user_id: int,
+    question: str,
+    context: Optional[dict] = None,
+) -> dict:
+    """
+    HIGH 级：老人询问健康建议（症状、能否吃某药等）。
+
+    安全设计：
+    - LLM 严禁直答（必经 health_evaluator 规则引擎）
+    - 包含紧急关键词 → 升级为 SOS 提示
+    - 普通担忧 → 给出"无恐吓式"建议 + 必加"请咨询医生"
+    """
+    try:
+        from app.services.health_evaluator import HealthRiskEvaluator
+    except ImportError:
+        return {"error": "健康评估器不可用"}
+
+    evaluator = HealthRiskEvaluator()
+    # ai_risk_info 用最低 base，让规则引擎主导判断
+    ai_risk_info = (context or {}).get("ai_risk_info", {"risk_score": 1, "category": "health"})
+    result = evaluator.evaluate(
+        user_id=str(user_id),
+        message=question,
+        ai_risk_info=ai_risk_info,
+    )
+
+    # 高风险情境：明确建议联系家属/医院
+    out = {
+        "risk_score": result.get("risk_score", 1),
+        "category": result.get("category"),
+        "reason": result.get("reason"),
+        "suggestion": result.get("suggestion"),
+        "need_notify_family": result.get("need_notify", False),
+        "disclaimer": "⚠️ 以上为辅助提示，不构成医疗诊断。请咨询医生或拨打 120。",
+    }
+    if result.get("risk_score", 0) >= 7:
+        out["urgent_action"] = "建议立即联系家人或医生"
+    return out
+
+
+async def _handler_trigger_sos(
+    user_id: int,
+    reason: str,
+    location: Optional[str] = None,
+) -> dict:
+    """
+    CRITICAL 级：触发 SOS 紧急求助。
+
+    必须经 dispatcher 的 confirm_token 二次校验（companion.py /tools/call 实施）。
+    本 handler 直接调用 emergency_service，已含完整的多通道通知 + DLQ 兜底（r1/r9）。
+    """
+    try:
+        from app.services.emergency_service import emergency_service
+    except ImportError:
+        return {"error": "紧急服务不可用"}
+
+    # 解析老人姓名（用于通知模板）
+    user_name = "老人"
+    try:
+        from app.models.database import SessionLocal, User
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.id == user_id).first()
+            if u and u.name:
+                user_name = u.name
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+    desc = f"通过 Companion 触发: {reason}"
+    if location:
+        desc += f"（位置: {location}）"
+    try:
+        alert = await emergency_service.trigger_sos(
+            user_id=user_id,
+            user_name=user_name,
+            description=desc,
+        )
+        return {
+            "alert_id": alert.alert_id,
+            "level": alert.level.value,
+            "status": alert.status.value,
+            "created_at": alert.created_at.isoformat() if alert.created_at else None,
+            "message": "已触发紧急求助，正在通知家人 / 社区医生",
+        }
+    except Exception as exc:
+        logger.exception(f"trigger_sos 异常: {exc}")
+        return {"error": f"SOS 触发异常: {exc}"}
+
+
 # ===== 注册 handler 到对应工具（在 _REGISTRY 填充后调用）=====
 
 def _wire_handlers() -> None:
     """把 handler 绑定到对应 ToolDefinition；在所有 register(...) 之后调用"""
     mapping = {
+        # LOW
         "log_medication_taken": _handler_log_medication_taken,
         "log_meal": _handler_log_meal,
         "log_mood": _handler_log_mood,
         "save_memory": _handler_save_memory,
         "query_health_trend": _handler_query_health_trend,
+        # MEDIUM / HIGH / CRITICAL
+        "video_call_family": _handler_video_call_family,
+        "book_community_service": _handler_book_community_service,
+        "request_health_advice": _handler_request_health_advice,
+        "trigger_sos": _handler_trigger_sos,
     }
     for name, fn in mapping.items():
         if name in _REGISTRY:

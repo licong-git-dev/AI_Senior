@@ -231,6 +231,9 @@ class DNDConfigRequest(BaseModel):
     dnd_end: Optional[str] = Field(None, description="HH:MM，如 07:00")
     daily_quota: Optional[int] = Field(None, ge=0, le=20)
     enabled: Optional[bool] = None
+    push_proactive: Optional[bool] = Field(
+        None, description="主动消息是否触发通知推送（默认 true）"
+    )
 
 
 @router.get("/proactive/inbox")
@@ -319,6 +322,7 @@ async def update_dnd(
         dnd_end=body.dnd_end,
         daily_quota=body.daily_quota,
         enabled=body.enabled,
+        push_proactive=body.push_proactive,
     )
 
 
@@ -355,3 +359,118 @@ async def list_triggers():
             for t in ALL_TRIGGERS
         ]
     }
+
+
+# ===== Phase 3 · 工具调用安全网关 =====
+
+
+class ToolCallRequest(BaseModel):
+    name: str = Field(..., description="工具名，见 /api/companion/tools")
+    params: dict = Field(default_factory=dict)
+    confirm_token: Optional[str] = Field(
+        None, description="MEDIUM/CRITICAL 级工具必须在二次调用时带 confirm_token"
+    )
+
+
+@router.post("/tools/call")
+async def call_tool(
+    body: ToolCallRequest,
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """
+    调用 Companion 工具。按安全等级分流：
+
+    - **LOW**：直接执行
+    - **MEDIUM / CRITICAL**：首次调用返回 pending_confirmation（需前端弹确认框），
+      二次调用带 confirm_token 才真正执行
+    - **HIGH**：直接执行，但 handler 内部必经规则引擎（如 request_health_advice）
+
+    生产环境已隐藏于 OpenAPI。
+    """
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+
+    from app.services.companion_tools import (
+        dispatch,
+        safety_level as tool_safety,
+        _REGISTRY,
+    )
+    from app.services.proactive_engagement import get_store
+
+    level = tool_safety(body.name)
+    if level is None:
+        raise HTTPException(status_code=404, detail=f"未知工具: {body.name}")
+
+    store = get_store()
+
+    # MEDIUM / CRITICAL：两步执行
+    if level in ("medium", "critical"):
+        if not body.confirm_token:
+            # 第一步：产生 pending confirmation
+            confirm_id = store.create_confirmation(
+                user_id=elder_id,
+                tool_name=body.name,
+                params=body.params,
+                safety_level=level,
+                ttl_seconds=300 if level == "medium" else 120,  # CRITICAL 更短 TTL
+            )
+            return {
+                "requires_confirmation": True,
+                "safety_level": level,
+                "confirm_token": confirm_id,
+                "ttl_seconds": 300 if level == "medium" else 120,
+                "tool": body.name,
+                "params": body.params,
+                "hint": "请向老人二次确认后，带 confirm_token 再次调用 /tools/call",
+            }
+
+        # 第二步：校验 token
+        pending = store.get_confirmation(body.confirm_token, elder_id)
+        if not pending:
+            raise HTTPException(
+                status_code=400,
+                detail="confirm_token 无效、已使用或已过期，请重新发起确认流程",
+            )
+        if pending["tool_name"] != body.name:
+            raise HTTPException(
+                status_code=400,
+                detail="confirm_token 对应的工具与本次调用不匹配",
+            )
+        # 消费 token（单次有效）
+        consumed = store.consume_confirmation(body.confirm_token, elder_id)
+        if not consumed:
+            raise HTTPException(status_code=409, detail="confirm_token 已被消费")
+
+    # 真正执行
+    result = await dispatch(body.name, elder_id, body.params)
+    return {
+        "tool": body.name,
+        "safety_level": level,
+        "result": result,
+    }
+
+
+@router.get("/confirmations")
+async def list_pending_confirmations(
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """前端拉取当前老人的待确认操作列表"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import get_store
+    return {"items": get_store().list_pending_confirmations(elder_id)}
+
+
+@router.delete("/confirmations/{confirm_id}")
+async def cancel_confirmation(
+    confirm_id: str,
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """老人取消某个待确认操作（如 SOS 误触）"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import get_store
+    ok = get_store().consume_confirmation(confirm_id, elder_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="confirmation 不存在或已失效")
+    return {"ok": True, "cancelled": confirm_id}

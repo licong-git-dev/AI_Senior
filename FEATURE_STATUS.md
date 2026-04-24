@@ -28,6 +28,19 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v10 增量（第十四轮 · Phase 3 工具调用真实化 + Phase 2 推送闭环）
+
+| 模块 | v9 | v10 | 备注 |
+|---|---|---|---|
+| 工具 handler | 🟡 5/9 LOW 绑定 | 🟢 9/9 全绑定 | MEDIUM/HIGH/CRITICAL 4 个补齐 |
+| 工具调用安全网关 | ❌ | 🟢 | `/tools/call` 按 safety 分流 + confirm_token 二次确认 |
+| pending_confirmations 持久化 | ❌ | 🟢 | 单次有效 + TTL + 越权防护 |
+| 主动推送链路 | 🟡 仅存储 | 🟢 接 NotificationService | 隐私摘要 + push_proactive 开关 |
+| 前端 Pending UI | ❌ | 🟢 | 琥珀/红配色 + 二次确认对话框 |
+| 安全网关单测 | ❌ | 🟢 | 8 case |
+
+**Phase 3 完成度**：真能办事（9 工具），真找得到人（推送闭环），真不会误触（二次确认）。距 Phase 4 多 agent 真实编排仅一步之遥。
+
 ## v9 增量（第十三轮 · 数字生命 Phase 2 — 主动开口）
 
 | 模块 | v8 | v9 | 备注 |

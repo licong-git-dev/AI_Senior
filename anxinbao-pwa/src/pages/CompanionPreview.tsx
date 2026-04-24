@@ -12,7 +12,7 @@
  * 不接入生产路由表；仅通过直接 URL 访问，避免老人 / 家属误入。
  */
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Bell, Brain, Heart, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bell, Brain, Heart, RefreshCw, Send, ShieldCheck, Trash2, X } from 'lucide-react';
 import { authFetch } from '../lib/api';
 
 interface PersonaSummary {
@@ -55,6 +55,15 @@ interface ProactiveMessage {
   acknowledged: boolean;
 }
 
+interface PendingConfirmation {
+  confirm_id: string;
+  tool_name: string;
+  params: Record<string, any>;
+  safety_level: 'medium' | 'critical' | string;
+  created_at: string;
+  expires_at: string;
+}
+
 export default function CompanionPreview() {
   const [persona, setPersona] = useState<PersonaSummary | null>(null);
   const [stats, setStats] = useState<MemoryStats | null>(null);
@@ -64,6 +73,7 @@ export default function CompanionPreview() {
   const [error, setError] = useState<string | null>(null);
   const [inbox, setInbox] = useState<ProactiveMessage[]>([]);
   const [evaluating, setEvaluating] = useState(false);
+  const [confirmations, setConfirmations] = useState<PendingConfirmation[]>([]);
 
   // 初始拉取 persona + 记忆统计
   useEffect(() => {
@@ -97,6 +107,52 @@ export default function CompanionPreview() {
         const data = await r.json();
         setInbox(data.items || []);
       }
+    } catch (_) { /* 忽略 */ }
+    // 同时刷新 pending confirmations
+    try {
+      const c = await authFetch('/api/companion/confirmations');
+      if (c.ok) {
+        const data = await c.json();
+        setConfirmations(data.items || []);
+      }
+    } catch (_) { /* 忽略 */ }
+  };
+
+  const confirmTool = async (pending: PendingConfirmation) => {
+    const warning =
+      pending.safety_level === 'critical'
+        ? `⚠️ 这是紧急操作 (${pending.tool_name})，会通知家人和社区医生。确认吗？`
+        : `确认执行 ${pending.tool_name}?\n\n参数：${JSON.stringify(pending.params)}`;
+    if (!window.confirm(warning)) return;
+
+    try {
+      const r = await authFetch('/api/companion/tools/call', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: pending.tool_name,
+          params: pending.params,
+          confirm_token: pending.confirm_id,
+        }),
+      });
+      const data = await r.json();
+      if (r.ok && data.result?.ok) {
+        window.alert(`✅ ${pending.tool_name} 已执行\n${JSON.stringify(data.result.result)}`);
+      } else {
+        window.alert(`❌ 执行失败：${data.result?.error || data.detail || 'unknown'}`);
+      }
+    } catch (err) {
+      window.alert(`请求异常：${err instanceof Error ? err.message : err}`);
+    } finally {
+      await refreshInbox();
+    }
+  };
+
+  const cancelConfirmation = async (confirm_id: string) => {
+    try {
+      await authFetch(`/api/companion/confirmations/${confirm_id}`, {
+        method: 'DELETE',
+      });
+      await refreshInbox();
     } catch (_) { /* 忽略 */ }
   };
 
@@ -320,6 +376,61 @@ export default function CompanionPreview() {
           </div>
         )}
       </div>
+
+      {/* Phase 3 · 待确认操作（MEDIUM/CRITICAL 工具调用）*/}
+      {confirmations.length > 0 && (
+        <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow p-4 mb-4 border-2 border-amber-400">
+          <div className="flex items-center gap-2 mb-3">
+            <ShieldCheck className="w-5 h-5 text-amber-600" />
+            <h3 className="font-bold">待您确认的操作（{confirmations.length}）</h3>
+          </div>
+          <div className="space-y-2">
+            {confirmations.map((pc) => (
+              <div
+                key={pc.confirm_id}
+                className={`rounded-xl p-3 border ${
+                  pc.safety_level === 'critical'
+                    ? 'bg-red-50 border-red-300'
+                    : 'bg-amber-50 border-amber-200'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-gray-800">
+                      {pc.safety_level === 'critical' && '🚨 '}
+                      {pc.tool_name}
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      参数：{JSON.stringify(pc.params)}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      将于 {new Date(pc.expires_at).toLocaleTimeString()} 过期
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <button
+                      onClick={() => confirmTool(pc)}
+                      className={`text-xs px-3 py-1 rounded text-white ${
+                        pc.safety_level === 'critical'
+                          ? 'bg-red-600 hover:bg-red-700'
+                          : 'bg-indigo-500 hover:bg-indigo-600'
+                      }`}
+                    >
+                      确认
+                    </button>
+                    <button
+                      onClick={() => cancelConfirmation(pc.confirm_id)}
+                      className="text-xs px-3 py-1 rounded text-gray-500 hover:bg-gray-100 flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" /> 取消
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 对话区 */}
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow flex flex-col" style={{ height: '50vh' }}>

@@ -85,9 +85,15 @@ class ProactiveStore:
                     suggested_topic TEXT,
                     delivered INTEGER DEFAULT 0,
                     acknowledged INTEGER DEFAULT 0,
+                    pushed INTEGER DEFAULT 0,
                     created_at TEXT NOT NULL
                 )
             """)
+            # 兼容老版本：若 pushed 列不存在则 ALTER 加（sqlite 允许）
+            try:
+                c.execute("ALTER TABLE proactive_messages ADD COLUMN pushed INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
             c.execute("""
                 CREATE TABLE IF NOT EXISTS dnd_configs (
                     user_id INTEGER PRIMARY KEY,
@@ -95,9 +101,14 @@ class ProactiveStore:
                     dnd_end TEXT NOT NULL DEFAULT '07:00',
                     daily_quota INTEGER NOT NULL DEFAULT 4,
                     enabled INTEGER NOT NULL DEFAULT 1,
+                    push_proactive INTEGER NOT NULL DEFAULT 1,
                     updated_at TEXT NOT NULL
                 )
             """)
+            try:
+                c.execute("ALTER TABLE dnd_configs ADD COLUMN push_proactive INTEGER NOT NULL DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
             c.execute("""
                 CREATE TABLE IF NOT EXISTS trigger_cooldowns (
                     user_id INTEGER NOT NULL,
@@ -106,7 +117,21 @@ class ProactiveStore:
                     PRIMARY KEY (user_id, trigger_name)
                 )
             """)
+            # Phase 3: MEDIUM/CRITICAL 工具调用待确认
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS pending_confirmations (
+                    confirm_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    params_json TEXT NOT NULL,
+                    safety_level TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed INTEGER DEFAULT 0
+                )
+            """)
             c.execute("CREATE INDEX IF NOT EXISTS ix_pm_user_created ON proactive_messages(user_id, created_at)")
+            c.execute("CREATE INDEX IF NOT EXISTS ix_pc_user ON pending_confirmations(user_id, consumed)")
 
     # ----- 主动消息 -----
 
@@ -172,35 +197,123 @@ class ProactiveStore:
                     "dnd_end": DEFAULT_DND_END,
                     "daily_quota": DAILY_QUOTA,
                     "enabled": True,
+                    "push_proactive": True,
                 }
-            return dict(row)
+            # 兼容老 schema 无 push_proactive 列
+            result = dict(row)
+            if "push_proactive" not in result:
+                result["push_proactive"] = 1
+            return result
 
     def upsert_dnd(self, user_id: int, dnd_start: Optional[str] = None,
                    dnd_end: Optional[str] = None, daily_quota: Optional[int] = None,
-                   enabled: Optional[bool] = None) -> Dict[str, any]:
+                   enabled: Optional[bool] = None,
+                   push_proactive: Optional[bool] = None) -> Dict[str, any]:
         existing = self.get_dnd(user_id)
         merged = {
             "dnd_start": dnd_start or existing["dnd_start"],
             "dnd_end": dnd_end or existing["dnd_end"],
             "daily_quota": daily_quota if daily_quota is not None else existing["daily_quota"],
             "enabled": int(enabled) if enabled is not None else int(existing["enabled"]),
+            "push_proactive": int(push_proactive) if push_proactive is not None else int(existing.get("push_proactive", 1)),
         }
         with self._conn() as c:
             c.execute(
                 """INSERT INTO dnd_configs
-                (user_id, dnd_start, dnd_end, daily_quota, enabled, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (user_id, dnd_start, dnd_end, daily_quota, enabled, push_proactive, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     dnd_start = excluded.dnd_start,
                     dnd_end = excluded.dnd_end,
                     daily_quota = excluded.daily_quota,
                     enabled = excluded.enabled,
+                    push_proactive = excluded.push_proactive,
                     updated_at = excluded.updated_at""",
                 (user_id, merged["dnd_start"], merged["dnd_end"],
-                 merged["daily_quota"], merged["enabled"],
+                 merged["daily_quota"], merged["enabled"], merged["push_proactive"],
                  datetime.now().isoformat()),
             )
         return self.get_dnd(user_id)
+
+    def mark_pushed(self, message_id: int) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE proactive_messages SET pushed = 1 WHERE id = ?",
+                (message_id,),
+            )
+
+    # ----- Pending Confirmations (Phase 3 工具安全网关) -----
+
+    def create_confirmation(
+        self, user_id: int, tool_name: str, params: dict, safety_level: str,
+        ttl_seconds: int = 600,
+    ) -> str:
+        import secrets
+        confirm_id = f"conf_{secrets.token_urlsafe(16)}"
+        now = datetime.now()
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        with self._conn() as c:
+            c.execute(
+                """INSERT INTO pending_confirmations
+                (confirm_id, user_id, tool_name, params_json, safety_level, created_at, expires_at, consumed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+                (confirm_id, user_id, tool_name, json.dumps(params, ensure_ascii=False),
+                 safety_level, now.isoformat(), expires_at.isoformat()),
+            )
+        return confirm_id
+
+    def get_confirmation(self, confirm_id: str, user_id: int) -> Optional[dict]:
+        with self._conn() as c:
+            row = c.execute(
+                """SELECT * FROM pending_confirmations
+                WHERE confirm_id = ? AND user_id = ? AND consumed = 0""",
+                (confirm_id, user_id),
+            ).fetchone()
+            if not row:
+                return None
+            try:
+                exp = datetime.fromisoformat(row["expires_at"])
+                if datetime.now() > exp:
+                    return None
+            except ValueError:
+                return None
+            return {
+                "confirm_id": row["confirm_id"],
+                "user_id": row["user_id"],
+                "tool_name": row["tool_name"],
+                "params": json.loads(row["params_json"] or "{}"),
+                "safety_level": row["safety_level"],
+                "created_at": row["created_at"],
+                "expires_at": row["expires_at"],
+            }
+
+    def consume_confirmation(self, confirm_id: str, user_id: int) -> bool:
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE pending_confirmations SET consumed = 1 WHERE confirm_id = ? AND user_id = ? AND consumed = 0",
+                (confirm_id, user_id),
+            )
+            return cur.rowcount > 0
+
+    def list_pending_confirmations(self, user_id: int, limit: int = 10) -> List[dict]:
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT * FROM pending_confirmations
+                WHERE user_id = ? AND consumed = 0 AND expires_at > ?
+                ORDER BY created_at DESC LIMIT ?""",
+                (user_id, datetime.now().isoformat(), limit),
+            ).fetchall()
+            return [
+                {
+                    "confirm_id": r["confirm_id"],
+                    "tool_name": r["tool_name"],
+                    "params": json.loads(r["params_json"] or "{}"),
+                    "safety_level": r["safety_level"],
+                    "created_at": r["created_at"],
+                    "expires_at": r["expires_at"],
+                }
+                for r in rows
+            ]
 
     # ----- Cooldown -----
 
@@ -326,7 +439,57 @@ async def evaluate_and_send(user_id: int) -> List[ProactiveMessage]:
         if today_count >= quota:
             over_quota = True
 
+        # 5) Phase 2 H：真实推送链路（仅当老人开启 push_proactive）
+        if dnd.get("push_proactive"):
+            await _push_proactive(user_id, msg)
+
     return results
+
+
+async def _push_proactive(user_id: int, msg: ProactiveMessage) -> None:
+    """
+    把主动消息推给家属 / 老人设备（走 NotificationService）。
+    失败已由 notification_service 内部 retry + DLQ 兜底（r9），这里只需调。
+
+    推送内容策略（隐私优先）：
+    - 标题：固定"安心宝来消息了"（不泄露触发器名 / 私密话题）
+    - 正文：仅前 40 字（避免在通知栏暴露完整 LLM 输出）
+    - 点击 deep link 回 /api/companion/proactive/inbox
+    """
+    try:
+        from app.services.notification_service import (
+            NotificationTemplate,
+            notification_service,
+        )
+    except Exception as exc:
+        logger.warning(f"[proactive push] notification_service 不可用: {exc}")
+        return
+
+    preview = (msg.text or "")[:40]
+    if len(msg.text or "") > 40:
+        preview += "…"
+
+    try:
+        await notification_service.send_notification(
+            user_id=user_id,
+            template=NotificationTemplate.HEALTH_ALERT
+            if msg.priority >= 7
+            else NotificationTemplate.APP_NOTIFICATION
+            if hasattr(NotificationTemplate, "APP_NOTIFICATION")
+            else NotificationTemplate.HEALTH_ALERT,
+            content=preview,
+            extra_data={
+                "source": "companion_proactive",
+                "message_id": msg.id,
+                "trigger_name": msg.trigger_name,
+                "priority": msg.priority,
+                "deep_link": "/api/companion/proactive/inbox",
+            },
+        )
+        # 标记已推（不管成功/失败，避免重复推送）
+        get_store().mark_pushed(msg.id or 0)
+    except Exception as exc:
+        logger.warning(f"[proactive push] 推送异常（DLQ 已兜底）: {exc}")
 
 
 async def _generate_text(user_id: int, ev) -> str:
