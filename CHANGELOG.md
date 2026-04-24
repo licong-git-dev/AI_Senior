@@ -8,7 +8,74 @@
 
 ---
 
-## r12 — `<pending>` · 数字生命陪伴 Phase 1 实施启动（A 选项）
+## r13 — `<pending>` · 数字生命陪伴 Phase 2 — "AI 主动开口"
+
+承接 r12 Phase 1 实施完成，本轮启动 Phase 2：让安心宝从"被动等待" → "主动开口"。
+仍在 `COMPANION_ENABLED=true` 门控后，零破坏现有功能。
+
+### 新增代码（4 个核心文件）
+
+- **6 类情境触发器** ([companion_triggers.py](anxinbao-server/app/services/companion_triggers.py))：
+  - `SilenceTrigger` —— ≥4h 无活动 → 主动问候
+  - `HealthAnomalyTrigger` —— 近 3 天血压 ≥3 次偏高 → 关切询问
+  - `FamilyAbsenceTrigger` —— 子女 7 天无互动 → 暗示主动联系
+  - `FestivalTrigger` —— 8 个传统节日（含老人节重阳）±3 天 → 节日问候
+  - `MemorialTrigger` —— 召回 EVENT 类记忆中今日纪念日 → 温柔提及
+  - `WeatherTrigger` —— 次日降温 8°C+ / 暴雨 / 高温 → 添衣 / 莫出门
+  - 每个 trigger 独立 `safe_evaluate` 异常兜底；按优先级 1-10 排序
+- **主动开口编排器** ([proactive_engagement.py](anxinbao-server/app/services/proactive_engagement.py))：
+  - 独立 SQLite 存储（`companion_proactive.db`，与 anxinbao.db 隔离）
+  - 三表：`proactive_messages` / `dnd_configs` / `trigger_cooldowns`
+  - DND（默认 22:00-07:00）+ 每日配额（默认 4 条）+ trigger cooldown
+  - 优先级 ≥9 可突破 DND（如重阳、急救情境）
+  - 调用 Hermes 生成开场白；失败用静态模板兜底（不影响触发链路）
+- **API 拓展** ([companion.py](anxinbao-server/app/api/companion.py))：
+  - `GET /api/companion/proactive/inbox` 拉取主动消息
+  - `POST /api/companion/proactive/{id}/delivered` 标记已展示
+  - `POST /api/companion/proactive/{id}/ack` 老人确认（用于 NPS）
+  - `GET /api/companion/dnd` / `PUT /api/companion/dnd` 配置请勿打扰
+  - `POST /api/companion/proactive/run-now` 手动触发评估（debug）
+  - `GET /api/companion/proactive/triggers` 列出注册的触发器
+- **Scheduler 集成** ([scheduler.py](anxinbao-server/app/core/scheduler.py))：
+  - 每天 8/13/19 三个时段评估所有老人的触发器
+  - 仅在 `COMPANION_ENABLED=true` 时注册（无影响未启用部署）
+  - 复用 r8 注册的异常监听器（job_errored 计入 metrics）
+
+### 单元测试（22 个 case）
+- [test_companion_triggers.py](anxinbao-server/tests/unit/test_companion_triggers.py) (10 case)：
+  - SilenceTrigger 阈值/首次用户/不应触发场景
+  - FestivalTrigger 节日窗口 + 重阳高优先级
+  - WeatherTrigger 降温/高温/无数据
+  - evaluate_all 优先级排序、6 个 trigger 全注册、异常兜底
+- [test_companion_proactive.py](anxinbao-server/tests/unit/test_companion_proactive.py) (12 case)：
+  - ProactiveStore CRUD + 用户隔离 + 越权防护
+  - DND 默认配置 / upsert 部分字段
+  - `_is_in_dnd` 跨午夜区间正确处理
+  - cooldown / quota count_today
+
+### 前端 Alpha 预览拓展
+- [CompanionPreview.tsx](anxinbao-pwa/src/pages/CompanionPreview.tsx) 新增"主动开口"卡片：
+  - 显示最近 5 条主动消息（区分已读/未读）
+  - 手动触发评估按钮（debug 用）
+  - 标记已读 / 触发器名 / 优先级 / 触发原因 完整暴露
+
+### 设计原则
+- 主动消息频率克制：默认 4 条/天 + DND 22:00-07:00
+- 老人感觉始终是"安心宝一个朋友"——所有消息都通过 Hermes 输出（带人格）
+- 失败链路全有兜底：trigger 异常→其他正常；Hermes 异常→模板；DB 异常→空数组
+- 隐私：触发评估只读取必要数据，不外传
+
+### Phase 2 完成度
+- ✅ 6 类触发器
+- ✅ DND + quota + cooldown 三道闸
+- ✅ 主动消息存储 + 收件箱 API
+- ✅ Scheduler 自动评估
+- ✅ 22 单元测试
+- ✅ 前端预览
+- 🟡 真实推送通道（接 NotificationService）—— 下轮可加
+- 🟡 接入 wttr.in 实时天气（当前 weather trigger 仅响应 context 注入）
+
+## r12 — [`7bb3c55`](https://github.com/licong-git-dev/AI_Senior/commit/7bb3c55) · 数字生命陪伴 Phase 1 实施启动（A 选项）
 
 接续 r11 交付的 RFC 与骨架，本轮推进到**实际可用的 Phase 1**。继续受 `COMPANION_ENABLED=true` 门控，不破坏现有任何功能。
 

@@ -221,3 +221,137 @@ async def list_companion_tools():
     _require_enabled()
     from app.services.companion_tools import list_tools
     return {"tools": list_tools()}
+
+
+# ===== Phase 2 · 主动开口 =====
+
+
+class DNDConfigRequest(BaseModel):
+    dnd_start: Optional[str] = Field(None, description="HH:MM，如 22:00")
+    dnd_end: Optional[str] = Field(None, description="HH:MM，如 07:00")
+    daily_quota: Optional[int] = Field(None, ge=0, le=20)
+    enabled: Optional[bool] = None
+
+
+@router.get("/proactive/inbox")
+async def proactive_inbox(
+    only_undelivered: bool = Query(False),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """
+    拉取主动消息收件箱。only_undelivered=true 仅返回老人未读的。
+    """
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import get_store
+    store = get_store()
+    items = store.list_inbox(elder_id, limit=limit, only_undelivered=only_undelivered)
+    return {
+        "total": len(items),
+        "items": [
+            {
+                "id": m.id,
+                "trigger_name": m.trigger_name,
+                "text": m.text,
+                "priority": m.priority,
+                "reason": m.reason,
+                "delivered": m.delivered,
+                "acknowledged": m.acknowledged,
+                "created_at": m.created_at,
+            }
+            for m in items
+        ],
+    }
+
+
+@router.post("/proactive/{message_id}/delivered")
+async def mark_proactive_delivered(
+    message_id: int,
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """前端拉取后标记为已展示"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import get_store
+    ok = get_store().mark_delivered(message_id, elder_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="消息不存在或无权操作")
+    return {"ok": True}
+
+
+@router.post("/proactive/{message_id}/ack")
+async def acknowledge_proactive(
+    message_id: int,
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """老人回应了主动消息（点击/语音回复）后，标记已确认。用于 NPS 与触发器调优。"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import get_store
+    ok = get_store().acknowledge(message_id, elder_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="消息不存在或无权操作")
+    return {"ok": True}
+
+
+@router.get("/dnd")
+async def get_dnd(current_user: UserInfo = Depends(get_current_user)):
+    """查看老人的 DND 配置（请勿打扰时段 + 每日主动消息配额）"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import get_store
+    return get_store().get_dnd(elder_id)
+
+
+@router.put("/dnd")
+async def update_dnd(
+    body: DNDConfigRequest,
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """更新 DND 配置；仅传需要改的字段即可"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import get_store
+    return get_store().upsert_dnd(
+        user_id=elder_id,
+        dnd_start=body.dnd_start,
+        dnd_end=body.dnd_end,
+        daily_quota=body.daily_quota,
+        enabled=body.enabled,
+    )
+
+
+@router.post("/proactive/run-now")
+async def trigger_proactive_now(
+    current_user: UserInfo = Depends(get_current_user),
+):
+    """
+    手动触发一次主动评估（用于调试 / 验证触发器是否工作）。
+    与 scheduler 的定时任务行为完全相同，仅作用于当前老人。
+    """
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.proactive_engagement import evaluate_and_send
+    msgs = await evaluate_and_send(elder_id)
+    return {
+        "evaluated": True,
+        "generated": len(msgs),
+        "messages": [
+            {"id": m.id, "trigger_name": m.trigger_name, "text": m.text, "priority": m.priority}
+            for m in msgs
+        ],
+    }
+
+
+@router.get("/proactive/triggers")
+async def list_triggers():
+    """列出当前注册的所有触发器（schema 与 cooldown）—— 仅 debug 用"""
+    _require_enabled()
+    from app.services.companion_triggers import ALL_TRIGGERS
+    return {
+        "triggers": [
+            {"name": t.name, "cooldown_hours": t.cooldown_hours}
+            for t in ALL_TRIGGERS
+        ]
+    }

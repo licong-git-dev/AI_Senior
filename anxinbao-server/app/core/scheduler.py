@@ -1261,6 +1261,30 @@ def init_scheduler():
         minute=0
     )
 
+    # ===== Phase 2 · 主动开口（情境触发器）=====
+    # 仅当 COMPANION_ENABLED=true 时注册，避免对未启用 Companion 的部署造成影响
+    import os as _os
+    if _os.environ.get("COMPANION_ENABLED", "false").lower() in ("1", "true", "yes"):
+        def _proactive_tick():
+            """每天 8/13/19 点跑一次：评估所有老人的触发器"""
+            try:
+                from app.services.proactive_engagement import evaluate_all_users_sync
+                generated = evaluate_all_users_sync()
+                logger.info(f"[proactive] tick 完成，生成 {generated} 条主动消息")
+            except Exception as exc:
+                logger.exception(f"[proactive] tick 异常: {exc}")
+
+        # 与日报推送 20:00 错开；早 8 / 午 13 / 晚 19 三次主动评估
+        for hour in (8, 13, 19):
+            scheduler.add_job(
+                _proactive_tick,
+                'cron',
+                job_id=f'companion_proactive_tick_{hour:02d}',
+                hour=hour,
+                minute=0,
+            )
+        logger.info("Companion Phase 2 主动评估任务已注册（8/13/19 点）")
+
     # 启动调度器
     scheduler.start()
 

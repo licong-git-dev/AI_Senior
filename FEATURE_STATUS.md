@@ -28,6 +28,19 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v9 增量（第十三轮 · 数字生命 Phase 2 — 主动开口）
+
+| 模块 | v8 | v9 | 备注 |
+|---|---|---|---|
+| 6 类情境触发器 | ❌ | 🟢 | silence/health_anomaly/family_absence/festival/memorial/weather |
+| ProactiveStore (DND/Quota/Cooldown) | ❌ | 🟢 | 独立 SQLite + 三表 |
+| 主动消息 API | ❌ | 🟢 | inbox / ack / dnd / run-now |
+| Scheduler 自动评估 | ❌ | 🟢 | 每天 8/13/19；仅 COMPANION_ENABLED 才注册 |
+| 主动消息单元测试 | ❌ | 🟢 | 22 case |
+| 前端主动消息 UI | ❌ | 🟢 | CompanionPreview 增强 |
+
+**Phase 2 就绪度**：完整链路打通（触发→DND→quota→cooldown→Hermes→存储→拉取→ack）。下一步**真实推送**（接 NotificationService 走极光）。
+
 ## v8 增量（第十二轮 · Phase 1 实施启动）
 
 | 模块 | v7 | v8 | 备注 |

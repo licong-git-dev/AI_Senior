@@ -12,7 +12,7 @@
  * 不接入生产路由表；仅通过直接 URL 访问，避免老人 / 家属误入。
  */
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Brain, Heart, Send, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bell, Brain, Heart, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { authFetch } from '../lib/api';
 
 interface PersonaSummary {
@@ -44,6 +44,17 @@ interface ChatMessage {
   at: string;
 }
 
+interface ProactiveMessage {
+  id: number;
+  trigger_name: string;
+  text: string;
+  priority: number;
+  reason: string;
+  created_at: string;
+  delivered: boolean;
+  acknowledged: boolean;
+}
+
 export default function CompanionPreview() {
   const [persona, setPersona] = useState<PersonaSummary | null>(null);
   const [stats, setStats] = useState<MemoryStats | null>(null);
@@ -51,6 +62,8 @@ export default function CompanionPreview() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inbox, setInbox] = useState<ProactiveMessage[]>([]);
+  const [evaluating, setEvaluating] = useState(false);
 
   // 初始拉取 persona + 记忆统计
   useEffect(() => {
@@ -68,12 +81,52 @@ export default function CompanionPreview() {
         if (sResp.ok) {
           setStats(await sResp.json());
         }
+
+        await refreshInbox();
       } catch (err) {
         setError(err instanceof Error ? err.message : '初始化失败');
       }
     };
     init();
   }, []);
+
+  const refreshInbox = async () => {
+    try {
+      const r = await authFetch('/api/companion/proactive/inbox?limit=10');
+      if (r.ok) {
+        const data = await r.json();
+        setInbox(data.items || []);
+      }
+    } catch (_) { /* 忽略 */ }
+  };
+
+  const runProactiveNow = async () => {
+    if (evaluating) return;
+    setEvaluating(true);
+    try {
+      const r = await authFetch('/api/companion/proactive/run-now', { method: 'POST' });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.generated > 0) {
+          window.alert(`生成了 ${data.generated} 条主动消息`);
+        } else {
+          window.alert('当前无触发器命中（DND/Cooldown/quota 都正常）');
+        }
+        await refreshInbox();
+      }
+    } catch (err) {
+      window.alert(`触发失败：${err instanceof Error ? err.message : err}`);
+    } finally {
+      setEvaluating(false);
+    }
+  };
+
+  const ackProactive = async (id: number) => {
+    try {
+      await authFetch(`/api/companion/proactive/${id}/ack`, { method: 'POST' });
+      await refreshInbox();
+    } catch (_) { /* 忽略 */ }
+  };
 
   const send = async () => {
     if (!input.trim() || sending) return;
@@ -210,6 +263,62 @@ export default function CompanionPreview() {
             <p className="text-sm text-gray-400">加载中...</p>
           )}
         </div>
+      </div>
+
+      {/* 主动消息区（Phase 2）*/}
+      <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Bell className="w-5 h-5 text-amber-500" />
+            <h3 className="font-bold">安心宝主动开口（Phase 2）</h3>
+            <span className="text-xs text-gray-400">
+              {inbox.length > 0 ? `${inbox.length} 条` : '暂无'}
+            </span>
+          </div>
+          <button
+            onClick={runProactiveNow}
+            disabled={evaluating}
+            className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${evaluating ? 'animate-spin' : ''}`} />
+            {evaluating ? '评估中...' : '手动触发评估'}
+          </button>
+        </div>
+        {inbox.length === 0 ? (
+          <p className="text-sm text-gray-400">
+            暂无主动消息。Scheduler 会在每天 8/13/19 点评估触发器。
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {inbox.slice(0, 5).map((m) => (
+              <div
+                key={m.id}
+                className={`rounded-xl p-3 border ${
+                  m.acknowledged
+                    ? 'bg-gray-50 border-gray-200 opacity-60'
+                    : 'bg-amber-50 border-amber-200'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-sm leading-6 text-gray-800">{m.text}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {m.trigger_name} · 优先级 {m.priority} · {m.reason}
+                    </p>
+                  </div>
+                  {!m.acknowledged && (
+                    <button
+                      onClick={() => ackProactive(m.id)}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 shrink-0"
+                    >
+                      标记已读
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 对话区 */}
