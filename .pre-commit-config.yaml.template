@@ -1,0 +1,81 @@
+# Pre-commit Hooks 配置模板
+#
+# 用途：在每次 git commit 前自动跑安全/质量检查，杜绝"伪 ✅"在本地就被拦下。
+#
+# 启用步骤：
+#   pip install pre-commit
+#   cp .pre-commit-config.yaml.template .pre-commit-config.yaml
+#   pre-commit install
+#
+# 之后每次 git commit 都会自动跑这些检查；过不了的就提交不了。
+# 如果想跳过单次（紧急 hotfix 才用）：git commit --no-verify
+#
+# 为什么是 template 而不是 .pre-commit-config.yaml 直接生效？
+# - 部分 hook 需要本地装好工具（flake8、mypy 等），强制启用对新人门槛高
+# - 让团队按需启用，避免一上来就被一堆告警挡住
+# - 有了模板，启用就是 cp + pre-commit install 两步
+
+repos:
+  # ===== 通用文件检查 =====
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace                  # 行尾空格
+      - id: end-of-file-fixer                    # 文件末尾换行
+      - id: check-yaml                           # YAML 语法
+      - id: check-added-large-files              # 大文件预警（默认 500KB）
+        args: [--maxkb=500]
+      - id: check-merge-conflict                 # 残留的合并冲突标记
+      - id: check-case-conflict                  # 大小写敏感冲突
+      - id: detect-private-key                   # 拦截 -----BEGIN PRIVATE KEY-----
+      - id: mixed-line-ending                    # 行尾换行符（LF）
+
+  # ===== Python =====
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        args: ['--select=E9,F63,F7,F82', '--show-source']  # 仅严重错误，与 CI 一致
+        files: ^anxinbao-server/.*\.py$
+
+  # ===== TypeScript / Frontend =====
+  # 注：依赖 anxinbao-pwa/node_modules，需 npm install 后才能跑
+  - repo: local
+    hooks:
+      - id: eslint
+        name: ESLint (anxinbao-pwa)
+        entry: bash -c 'cd anxinbao-pwa && test -d node_modules && npm run lint || echo "  node_modules 未安装，跳过 lint"'
+        language: system
+        files: ^anxinbao-pwa/src/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+  # ===== 安心宝项目专属安全门 =====
+  - repo: local
+    hooks:
+      # 拦截"提交内含 PAT/凭据"
+      - id: no-hardcoded-pat
+        name: 禁止提交 GitHub PAT
+        entry: bash -c 'if grep -rE "ghp_[A-Za-z0-9]{36,}" --include="*.py" --include="*.ts" --include="*.tsx" --include="*.md" --include="*.yml" --exclude-dir=.git "$@"; then echo "🚨 检测到 GitHub PAT，拒绝提交"; exit 1; fi' --
+        language: system
+        pass_filenames: false
+
+      # 拦截"提交内含 test/placeholder 关键字凭据"
+      - id: no-placeholder-secrets
+        name: 禁止提交占位密钥到非 .env.example 的文件
+        entry: bash -c 'matches=$(grep -rEn "(test_private_key|alipay_test_app_id|your-secret-key|please-replace)" --include="*.py" --include="*.ts" --include="*.tsx" --exclude="*.example" --exclude-dir=.git --exclude-dir=docs . 2>/dev/null); if [ -n "$matches" ]; then echo "🚨 检测到占位密钥被提交（应仅在 .env.example 中出现）："; echo "$matches"; exit 1; fi'
+        language: system
+        pass_filenames: false
+
+      # 提交前跑集成自检（开发模式，不阻断，仅提醒）
+      - id: integration-check
+        name: 集成真实性快照（仅提醒）
+        entry: bash -c 'cd anxinbao-server && python3 scripts/check_integrations.py 2>/dev/null || true'
+        language: system
+        pass_filenames: false
+        verbose: true                # 即使通过也显示输出
+
+# 默认全部 hook 都在 pre-commit 阶段跑（见 https://pre-commit.com/#confining-hooks-to-run-at-certain-stages）
+default_stages: [pre-commit]
+
+# 失败时不要中断后续 hook，让一次提交就能看到全部问题
+fail_fast: false

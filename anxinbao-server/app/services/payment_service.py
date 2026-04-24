@@ -219,10 +219,18 @@ class AlipayService:
     """支付宝服务"""
 
     def __init__(self):
-        self.app_id = getattr(settings, 'alipay_app_id', 'alipay_test_app_id')
-        self.private_key = getattr(settings, 'alipay_private_key', 'test_private_key')
-        self.public_key = getattr(settings, 'alipay_public_key', 'test_public_key')
-        self.notify_url = getattr(settings, 'payment_notify_url', 'https://api.anxinbao.com/payment/notify/alipay')
+        # ⚠️ 历史版本用 'alipay_test_app_id' / 'test_private_key' 等占位字符串作为
+        #    getattr fallback。这会让"凭据未配置"的场景悄悄使用测试样板字符串，
+        #    支付宝服务端必拒签且日志不显眼，是潜在的伪 ✅。
+        # 现在改为空串 fallback，并暴露 _credentials_ready() 让上游显式判定。
+        self.app_id = getattr(settings, 'alipay_app_id', '') or ''
+        self.private_key = getattr(settings, 'alipay_private_key', '') or ''
+        self.public_key = getattr(settings, 'alipay_public_key', '') or ''
+        self.notify_url = getattr(settings, 'payment_notify_url', '') or ''
+
+    def _credentials_ready(self) -> bool:
+        """生产前必须先校验真实凭据已配置；缺失即拒绝走签名链路"""
+        return bool(self.app_id and self.private_key and self.public_key and self.notify_url)
 
     def create_trade(
         self,
@@ -230,6 +238,21 @@ class AlipayService:
         product_code: str = "QUICK_MSECURITY_PAY"
     ) -> Dict[str, Any]:
         """创建支付宝订单"""
+        if not self._credentials_ready():
+            from app.core.config import get_settings as _gs
+            if not _gs().debug:
+                # 生产模式拒绝伪签名 —— 避免给前端返回看似成功实则签名错误的 order_string
+                return {
+                    'code': '99001',
+                    'msg': 'AlipayService not configured (missing real credentials)',
+                    'order_string': '',
+                }
+            # DEBUG 模式：让 UI 调试继续，但日志显式告警
+            import logging
+            logging.getLogger(__name__).warning(
+                "[mock] Alipay 凭据未配置，返回的 order_string 仅供 UI 调试，"
+                "支付宝服务端会拒签。详见 docs/PAYMENT_ALIPAY_SETUP.md。"
+            )
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         biz_content = {
