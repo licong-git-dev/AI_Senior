@@ -335,6 +335,102 @@ class WeatherTrigger(BaseTrigger):
         return TriggerEvaluation(self.name, fired=False, reason="天气平稳")
 
 
+# ===== 7. 人生时刻（个性化 · 比节日更精准）=====
+
+
+class LifeMomentTrigger(BaseTrigger):
+    """
+    个性化人生时刻 (r17 · EMOTIONAL_MOMENTS.md)
+
+    与 FestivalTrigger（通用节日）的区别：
+    - 节日：所有老人共享（中秋/春节）
+    - 人生时刻：完全个人化（您 70 岁生日 / 您和老伴 40 周年）
+
+    数据源：
+    - 老人本人生日 / 老伴生日 / 子女生日 / 孙辈生日
+    - 结婚纪念日
+    - 退休纪念日
+    - 任何老人 LLM 抽取入 EVENT 类记忆且 occurred_at 含日期的事件
+
+    优先级（priority）：
+    - 老人本人生日 → 9（突破 DND）
+    - 老伴生日（健在）→ 8
+    - 子女/孙辈生日 → 7
+    - 结婚纪念日 → 7
+    - 其他 → 6
+    """
+    name = "life_moment"
+    cooldown_hours = 12
+
+    # 关键词→优先级映射（从 event content 推断）
+    _PRIORITY_HINTS = (
+        ("我.*生日", 9),
+        ("自己生日", 9),
+        ("老伴.*生日", 8),
+        ("配偶.*生日", 8),
+        ("儿子.*生日", 7),
+        ("女儿.*生日", 7),
+        ("孙.*生日", 7),
+        ("结婚.*纪念", 7),
+        ("退休.*纪念", 6),
+    )
+
+    def evaluate(self, user_id: int, context: Dict[str, Any]) -> TriggerEvaluation:
+        try:
+            from app.services.memory_engine import MemoryType, get_memory_engine
+        except Exception:
+            return TriggerEvaluation(self.name, fired=False, reason="记忆引擎不可用")
+
+        now = context.get("now") or datetime.now()
+        engine = get_memory_engine()
+
+        # 显式拉 EVENT 类记忆（含 occurred_at 的所有人生事件）
+        events = engine.recall(
+            user_id=user_id,
+            types=[MemoryType.EVENT],
+            top_k=50,  # 一年最多 ~50 个个人时刻已是上限
+        )
+
+        for ev in events:
+            if not ev.occurred_at:
+                continue
+            try:
+                occurred = datetime.fromisoformat(ev.occurred_at)
+                # 把年份替换为今年（生日 / 纪念日是循环的）
+                this_year = occurred.replace(year=now.year)
+                delta = (this_year - now).days
+                # 提前 3 天到当天后 1 天均算"临近"
+                if -1 <= delta <= 3:
+                    priority = self._infer_priority(ev.content)
+                    return TriggerEvaluation(
+                        trigger_name=self.name,
+                        fired=True,
+                        reason=f"个人时刻临近（{delta:+d}d）: {ev.content[:30]}",
+                        suggested_topic=self._build_topic(ev.content, delta),
+                        priority=priority,
+                    )
+            except (ValueError, AttributeError):
+                continue
+        return TriggerEvaluation(self.name, fired=False, reason="近期无个人时刻")
+
+    @classmethod
+    def _infer_priority(cls, content: str) -> int:
+        import re
+        for pattern, prio in cls._PRIORITY_HINTS:
+            if re.search(pattern, content):
+                return prio
+        return 6
+
+    @staticmethod
+    def _build_topic(content: str, delta: int) -> str:
+        if delta > 0:
+            return f"温和提及'{content[:30]}'即将到来（{delta}天后），问要不要做点准备"
+        elif delta == 0:
+            return f"今天就是'{content[:30]}'，用方言送上诚挚问候，注意：忌日类不要祝福"
+        else:
+            return f"昨天是'{content[:30]}'，温和回访，问昨天过得怎么样"
+
+
 # ===== 全局注册 =====
 
 ALL_TRIGGERS: List[BaseTrigger] = [
@@ -344,6 +440,7 @@ ALL_TRIGGERS: List[BaseTrigger] = [
     FestivalTrigger(),
     MemorialTrigger(),
     WeatherTrigger(),
+    LifeMomentTrigger(),  # r17 · 个性化时刻
 ]
 
 

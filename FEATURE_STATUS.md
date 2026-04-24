@@ -28,6 +28,25 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v13 增量（第十七轮 · 产品+业务视角打磨）
+
+| 模块 | v12 | v13 | 备注 |
+|---|---|---|---|
+| 产品洞察文档 | ❌ | 🟢 3 份 | PRODUCT_INSIGHTS / CRISIS_PLAYBOOK / EMOTIONAL_MOMENTS |
+| LIFE_STORY 记忆类型 | ❌ | 🟢 | 默认不召回，仅数字遗产场景消费 |
+| special_mode 状态机 | ❌ | 🟢 | crisis/bereavement/hospital/relocation 4 态 |
+| LifeMomentTrigger | ❌ | 🟢 | 7 个触发器，个性化时刻覆盖 |
+| r17 单元测试 | ❌ | 🟢 13 case | LIFE_STORY + LifeMoment + special_mode |
+
+**距上线还差什么**：
+- ❌ 家庭账户模型（付费者≠使用者悖论，见 Insight #1）
+- ❌ 订阅 SKU 改造（¥588 年卡 / ¥199 团购）
+- ❌ 留存"陪伴值"养成系统（Insight #3）
+- ❌ 子女端危机/丧偶/搬家模式切换 UI
+- ❌ 北极星指标埋点
+
+这些都不是工程师能独立闭环的，需要**产品 + BD + 法务 + 设计**协同。
+
 ## v12 增量（第十六轮 · 成果总结 · 路演 + 演示 + 验收三文档）
 
 不新增代码能力，把 15 轮自治打包成可对外使用的文档体：

@@ -315,10 +315,17 @@ docker-compose --profile production up -d
 ### 📣 对外路演 / 内部评审
 | 文档 | 用途 |
 |---|---|
-| [ROADSHOW_SUMMARY.md](ROADSHOW_SUMMARY.md) | **投资人/团队路演成果摘要** — 15 轮自治时间线 + 核心能力 + 诚实边界 |
+| [ROADSHOW_SUMMARY.md](ROADSHOW_SUMMARY.md) | **投资人/团队路演成果摘要** — 自治时间线 + 核心能力 + 诚实边界 |
 | [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | **30 分钟真实演示脚本** — 含 curl 命令 + 预期输出 + Q&A |
 | [VERIFICATION_CHECKLIST.md](VERIFICATION_CHECKLIST.md) | **上线前验收清单** — 46 项验证 + 10 项生产 Gate + 7 角色签字栏 |
-| [CHANGELOG.md](CHANGELOG.md) | 所有 16 轮自治的可感知变化记录 |
+| [CHANGELOG.md](CHANGELOG.md) | 所有自治轮次的可感知变化记录 |
+
+### 🧭 产品 + 业务战略（r17 新增）
+| 文档 | 用途 |
+|---|---|
+| [PRODUCT_INSIGHTS.md](PRODUCT_INSIGHTS.md) | **10 个高价值产品/业务洞察 + 优先级矩阵** — CEO/CPO 视角的"真正决定输赢的判断" |
+| [CRISIS_PLAYBOOK.md](CRISIS_PLAYBOOK.md) | **危机时刻产品 Playbook** — 摔倒/丧偶/重病/搬家 4 类危机的产品行为设计 |
+| [EMOTIONAL_MOMENTS.md](EMOTIONAL_MOMENTS.md) | **温度时刻设计** — 生日/婚纪/孙辈/失去爱人的个性化时刻 |
 
 ### 🤖 数字生命陪伴（Alpha）
 | 文档 | 用途 |

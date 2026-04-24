@@ -8,7 +8,75 @@
 
 ---
 
-## r16 — `<pending>` · 15 轮成果总结 · 路演 + 演示 + 验收三文档（O 选项）
+## r17 — `<pending>` · 产品+业务专家视角打磨 · 温度时刻 + 危机时刻
+
+本轮是"**产品维度**"升级，不是技术重构。从业务专家 + 产品专家视角产出 10 个高价值洞察，并为最关键的 3 个落到代码。
+
+### 3 份产品战略文档
+- **[PRODUCT_INSIGHTS.md](PRODUCT_INSIGHTS.md)**（~300 行）—— 10 个高价值洞察 + 优先级矩阵：
+  - 付费者/使用者悖论 → 必须做家庭账户
+  - 老人付费心智 → ¥588 年卡 / ¥199 团购（比月订阅更契合）
+  - D30 留存真正抓手 → "陪伴值"养成
+  - 被低估的差异化：**人生故事数字遗产**
+  - 真正的产品时刻是**危机时刻**
+  - 温度时刻 = 个性化而非通用节日
+  - 家庭是多边网络，不是二元关系
+  - B 端信使商业化路径
+  - 获客渠道真实优先级（朋友圈广告垫底）
+  - 北极星指标必须重定义
+- **[CRISIS_PLAYBOOK.md](CRISIS_PLAYBOOK.md)**（~200 行）—— 4 类危机的产品 Playbook：
+  - C1 摔倒/急病 24 小时（进入/期间/退出信号 + 黄金 30min 行为）
+  - C2 丧偶 30-90 天（bereavement_mode + 关键词避雷 + 温和回响）
+  - C3 重病/临终（告别录制 + 遗言整理 + 不谈康复）
+  - C4 搬家/子女离开（环境适配 + 联系频率提升）
+- **[EMOTIONAL_MOMENTS.md](EMOTIONAL_MOMENTS.md)**（~180 行）—— 个性化温度时刻设计：
+  - 10 类人生时刻优先级
+  - 老人本人生日 T-7 / T-1 / T / T+1 完整体验链
+  - 老伴忌日的敏感设计
+  - 与 CRISIS_PLAYBOOK 的协同优先级
+
+### 3 项代码落地（Insight #4/5/6 实施）
+
+**#4 · LIFE_STORY 记忆类型** ([memory_engine.py](anxinbao-server/app/services/memory_engine.py))：
+- 新增 `MemoryType.LIFE_STORY`
+- 默认**不参与对话召回**（避免老人讲过的话被反复喂回去）
+- 仅显式 `types=[LIFE_STORY]` 才召回（用于 LifeMomentTrigger / 数字遗产导出）
+
+**#5 · special_mode 字段** ([proactive_engagement.py](anxinbao-server/app/services/proactive_engagement.py))：
+- `dnd_configs` 表新增 `special_mode` + `special_mode_started_at`
+- 取值：`normal / bereavement / crisis / hospital / relocation`
+- `evaluate_and_send` 读取 `special_mode` 动态调度：
+  - crisis → quota=1，仅 priority≥9；mute silence/festival/life_moment 等
+  - bereavement → quota 减半；mute family_absence/festival/life_moment/memorial
+  - hospital → quota=1；mute 多数 trigger
+- `upsert_dnd` 支持切换 mode 且自动记录 started_at
+
+**#6 · LifeMomentTrigger** ([companion_triggers.py](anxinbao-server/app/services/companion_triggers.py))：
+- 基于 EVENT 类记忆的 `occurred_at` 字段
+- 今日 ±3 天内触发
+- 智能优先级：自己生日 9 / 老伴生日 8 / 子女孙辈 7 / 结婚纪念 7 / 其他 6
+- 与 FestivalTrigger（通用节日）并行互补
+
+### 单元测试（13 个新 case · [test_companion_r17.py](anxinbao-server/tests/unit/test_companion_r17.py)）
+- LIFE_STORY 不参与默认召回 / 显式召回可拿到
+- LifeMomentTrigger 生日当天 fires priority=9
+- 孙辈生日 priority=7
+- 远期事件不 fires
+- special_mode 设置 / 切换 / 保留其他字段
+
+### 设计原则
+产品打磨不等于做更多功能。本轮强调：
+- **约束是设计**（LIFE_STORY 默认不召回 → 真正做到"只积累、不滥用"）
+- **模式是护栏**（special_mode → 危机时刻行为约束的技术化）
+- **个性化 > 通用化**（LifeMoment > Festival）
+
+### Phase 进度
+- ✅ Phase 1 (r11-r12) + Phase 2 (r13-r14) + Phase 3 (r14)
+- ✅ 实时天气 (r15) + E2E 测试 (r15) + 成果打包 (r16)
+- ✅ **产品维度打磨** (r17) —— 温度 + 危机两维度
+- 🟡 Phase 4 多 agent 真实编排（团队选择）
+
+## r16 — [`67d3f1c`](https://github.com/licong-git-dev/AI_Senior/commit/67d3f1c) · 15 轮成果总结 · 路演 + 演示 + 验收三文档（O 选项）
 
 本轮不新增代码能力，而是**把 15 轮自治成果打包成可对外使用的文档体**。
 

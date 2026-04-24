@@ -45,6 +45,7 @@ class MemoryType(str, Enum):
     RELATION = "relation"
     EVENT = "event"
     MOOD = "mood"
+    LIFE_STORY = "life_story"  # r17 · 人生故事 / 录音 / 给后辈的话；不参与对话召回
 
 
 class MemoryVisibility(str, Enum):
@@ -176,6 +177,10 @@ class MemoryEngine:
         """
         基于关键词 + 时间衰减 + 类型 + 重要性的简单打分召回。
 
+        关键设计：
+        - LIFE_STORY 类型默认**不参与召回**（避免老人讲过的话被反复喂回去）
+        - 仅当 types 显式包含 LIFE_STORY 时才召回（典型场景：LifeMomentTrigger / 数字遗产导出）
+
         v2 可换成向量召回，接口不变。
         """
         with self._conn() as c:
@@ -185,6 +190,10 @@ class MemoryEngine:
                 placeholders = ",".join(["?"] * len(types))
                 sql += f" AND type IN ({placeholders})"
                 params.extend([t.value for t in types])
+            else:
+                # 默认排除 LIFE_STORY（避免反复喂回老人讲过的话）
+                sql += " AND type != ?"
+                params.append(MemoryType.LIFE_STORY.value)
             rows = c.execute(sql, params).fetchall()
 
         scored: List[Tuple[float, MemoryRecord]] = []

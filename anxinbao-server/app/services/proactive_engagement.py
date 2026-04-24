@@ -102,11 +102,23 @@ class ProactiveStore:
                     daily_quota INTEGER NOT NULL DEFAULT 4,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     push_proactive INTEGER NOT NULL DEFAULT 1,
+                    special_mode TEXT,
+                    special_mode_started_at TEXT,
                     updated_at TEXT NOT NULL
                 )
             """)
             try:
                 c.execute("ALTER TABLE dnd_configs ADD COLUMN push_proactive INTEGER NOT NULL DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            # r17 · 危机时刻 / 温度时刻 special_mode 支持
+            # 取值: normal / bereavement / crisis / hospital / relocation
+            try:
+                c.execute("ALTER TABLE dnd_configs ADD COLUMN special_mode TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE dnd_configs ADD COLUMN special_mode_started_at TEXT")
             except sqlite3.OperationalError:
                 pass
             c.execute("""
@@ -198,6 +210,8 @@ class ProactiveStore:
                     "daily_quota": DAILY_QUOTA,
                     "enabled": True,
                     "push_proactive": True,
+                    "special_mode": None,
+                    "special_mode_started_at": None,
                 }
             # 兼容老 schema 无 push_proactive 列
             result = dict(row)
@@ -208,7 +222,8 @@ class ProactiveStore:
     def upsert_dnd(self, user_id: int, dnd_start: Optional[str] = None,
                    dnd_end: Optional[str] = None, daily_quota: Optional[int] = None,
                    enabled: Optional[bool] = None,
-                   push_proactive: Optional[bool] = None) -> Dict[str, any]:
+                   push_proactive: Optional[bool] = None,
+                   special_mode: Optional[str] = None) -> Dict[str, any]:
         existing = self.get_dnd(user_id)
         merged = {
             "dnd_start": dnd_start or existing["dnd_start"],
@@ -217,20 +232,32 @@ class ProactiveStore:
             "enabled": int(enabled) if enabled is not None else int(existing["enabled"]),
             "push_proactive": int(push_proactive) if push_proactive is not None else int(existing.get("push_proactive", 1)),
         }
+        # 处理 special_mode 切换
+        new_special_mode = special_mode if special_mode is not None else existing.get("special_mode")
+        new_special_mode_started_at = (
+            datetime.now().isoformat()
+            if special_mode is not None and special_mode != existing.get("special_mode")
+            else existing.get("special_mode_started_at")
+        )
+
         with self._conn() as c:
             c.execute(
                 """INSERT INTO dnd_configs
-                (user_id, dnd_start, dnd_end, daily_quota, enabled, push_proactive, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (user_id, dnd_start, dnd_end, daily_quota, enabled, push_proactive,
+                 special_mode, special_mode_started_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     dnd_start = excluded.dnd_start,
                     dnd_end = excluded.dnd_end,
                     daily_quota = excluded.daily_quota,
                     enabled = excluded.enabled,
                     push_proactive = excluded.push_proactive,
+                    special_mode = excluded.special_mode,
+                    special_mode_started_at = excluded.special_mode_started_at,
                     updated_at = excluded.updated_at""",
                 (user_id, merged["dnd_start"], merged["dnd_end"],
                  merged["daily_quota"], merged["enabled"], merged["push_proactive"],
+                 new_special_mode, new_special_mode_started_at,
                  datetime.now().isoformat()),
             )
         return self.get_dnd(user_id)
@@ -389,6 +416,12 @@ async def evaluate_and_send(user_id: int) -> List[ProactiveMessage]:
     """
     对单个老人评估所有 trigger；通过过滤后调用 Hermes 生成文本并入库。
     返回本次新生成的 ProactiveMessage 列表（可空）。
+
+    r17 · 加入 special_mode 调度（详见 CRISIS_PLAYBOOK.md）：
+    - bereavement → quota 减半 + 跳过 family_absence/festival/life_moment
+    - crisis → 跳过所有非 critical 触发
+    - hospital → quota=1，仅 SOS 类
+    - relocation → 暂时不限制（可后续添加专属逻辑）
     """
     from app.services.companion_triggers import evaluate_all
 
@@ -399,12 +432,40 @@ async def evaluate_and_send(user_id: int) -> List[ProactiveMessage]:
         now, dnd["dnd_start"], dnd["dnd_end"]
     )
 
+    # ===== Special Mode 守卫（r17） =====
+    special = (dnd.get("special_mode") or "normal").lower()
+    if special == "crisis":
+        # 危机模式：跳过所有非 critical（priority < 9）触发
+        logger.info(f"[proactive] 用户 {user_id} 处于 crisis mode，仅响应 priority>=9")
+
+    # 模式 → 配额调整
+    base_quota = dnd.get("daily_quota") or DAILY_QUOTA
+    if special == "bereavement":
+        base_quota = max(1, base_quota // 2)
+    elif special == "hospital":
+        base_quota = 1
+    elif special == "crisis":
+        base_quota = 1
+
     today_count = store.count_today(user_id)
-    quota = dnd.get("daily_quota") or DAILY_QUOTA
+    quota = base_quota
     over_quota = today_count >= quota
+
+    # 模式 → 屏蔽特定 trigger 名
+    muted_triggers = set()
+    if special == "bereavement":
+        muted_triggers = {"family_absence", "festival", "life_moment", "memorial"}
+    elif special == "crisis":
+        muted_triggers = {"family_absence", "festival", "life_moment", "memorial", "weather", "silence"}
+    elif special == "hospital":
+        muted_triggers = {"family_absence", "festival", "life_moment", "weather"}
 
     results: List[ProactiveMessage] = []
     for ev in evaluate_all(user_id):
+        # 0) Special mode 守卫（r17）：mute 特定 trigger
+        if ev.trigger_name in muted_triggers:
+            logger.debug(f"[proactive] special_mode={special} 屏蔽 {ev.trigger_name}")
+            continue
         # 1) DND：仅高优先级（≥9）可突破
         if in_dnd and ev.priority < PRIORITY_BREAK_DND:
             logger.debug(f"[proactive] {ev.trigger_name} 命中 DND，跳过")
