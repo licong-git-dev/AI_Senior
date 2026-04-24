@@ -8,7 +8,37 @@
 
 ---
 
-## r15 — `<pending>` · 实时天气接入 + Phase 1-3 端到端集成测试（M + L）
+## r16 — `<pending>` · 15 轮成果总结 · 路演 + 演示 + 验收三文档（O 选项）
+
+本轮不新增代码能力，而是**把 15 轮自治成果打包成可对外使用的文档体**。
+
+### 新增 3 份对外文档
+- **[ROADSHOW_SUMMARY.md](ROADSHOW_SUMMARY.md)** — 投资人 / 团队路演摘要
+  - 一页式执行摘要 + 起点 vs 现状数据对比
+  - 15 轮时间线 + 每轮核心价值
+  - 核心能力现状（只列 🟢 绿色项）
+  - 不能对外宣传的（诚实边界话术对照）
+  - Phase 4 决策议题 + 4 项 P0 风险
+- **[DEMO_SCRIPT.md](DEMO_SCRIPT.md)** — 30 分钟真实演示脚本
+  - 0 开场 + 1 环境准备 + 2 Phase 1 + 3 Phase 2 + 4 Phase 3 + 5 安全红线 + 6 一行自检 + 7 Q&A + 8 结语
+  - 每步含 curl 命令 + 预期输出 + 演示亮点
+  - 附录故障排查表
+- **[VERIFICATION_CHECKLIST.md](VERIFICATION_CHECKLIST.md)** — 上线前验收清单
+  - 46 项可执行验证命令（全部无需启动服务）
+  - 9 章（基础环境 / 三色灯 / 安全门 / 数字生命 / 测试覆盖 / 文档 / 生产 Gate / 上线后监控 / 签字）
+  - 7 角色签字栏（后端/前端/QA/安全/法务/产品/CEO）
+
+### 更新
+- [README.md](README.md) 顶部新增"对外路演 / 内部评审"文档索引段
+- [FEATURE_STATUS.md](FEATURE_STATUS.md) v12 增量
+
+### 此轮交付物使用路径
+- **投资人答辩** → 开 `ROADSHOW_SUMMARY.md` 对齐预期 → 跟 `DEMO_SCRIPT.md` 现场跑
+- **团队新人** → 按 `DEMO_SCRIPT.md` 30 分钟熟悉能力 → 按 `VERIFICATION_CHECKLIST.md` 验证环境
+- **QA/安全** → `VERIFICATION_CHECKLIST.md` 第 7 章 10 项 Gate 是上线必经
+- **法务** → `DIGITAL_COMPANION_RISKS.md` + VERIFICATION 第 9 章签字栏
+
+## r15 — [`5719044`](https://github.com/licong-git-dev/AI_Senior/commit/5719044) · 实时天气接入 + Phase 1-3 端到端集成测试（M + L）
 
 ### M：wttr.in 实时天气接入
 - **新增 [`app/services/weather_service.py`](anxinbao-server/app/services/weather_service.py)**：

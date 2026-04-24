@@ -312,6 +312,22 @@ docker-compose --profile production up -d
 
 ## 关键运维与开发文档
 
+### 📣 对外路演 / 内部评审
+| 文档 | 用途 |
+|---|---|
+| [ROADSHOW_SUMMARY.md](ROADSHOW_SUMMARY.md) | **投资人/团队路演成果摘要** — 15 轮自治时间线 + 核心能力 + 诚实边界 |
+| [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | **30 分钟真实演示脚本** — 含 curl 命令 + 预期输出 + Q&A |
+| [VERIFICATION_CHECKLIST.md](VERIFICATION_CHECKLIST.md) | **上线前验收清单** — 46 项验证 + 10 项生产 Gate + 7 角色签字栏 |
+| [CHANGELOG.md](CHANGELOG.md) | 所有 16 轮自治的可感知变化记录 |
+
+### 🤖 数字生命陪伴（Alpha）
+| 文档 | 用途 |
+|---|---|
+| [anxinbao-server/docs/DIGITAL_COMPANION_RFC.md](anxinbao-server/docs/DIGITAL_COMPANION_RFC.md) | **完整 4 阶段架构 RFC**（~700 行） |
+| [anxinbao-server/docs/DIGITAL_COMPANION_COST.md](anxinbao-server/docs/DIGITAL_COMPANION_COST.md) | 成本模型（¥9 → ¥168/月/老人）+ 套餐建议 |
+| [anxinbao-server/docs/DIGITAL_COMPANION_RISKS.md](anxinbao-server/docs/DIGITAL_COMPANION_RISKS.md) | 4 P0 + 6 P1 + 合规清单 + kill switch |
+
+### 🛠️ 工程与运维
 | 文档 | 用途 |
 |---|---|
 | [FEATURE_STATUS.md](FEATURE_STATUS.md) | **功能就绪度三色灯**（🟢/🟡/🔴），对外宣传只能引用绿色项 |

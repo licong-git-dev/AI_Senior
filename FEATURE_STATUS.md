@@ -28,6 +28,22 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v12 增量（第十六轮 · 成果总结 · 路演 + 演示 + 验收三文档）
+
+不新增代码能力，把 15 轮自治打包成可对外使用的文档体：
+
+| 文档 | 用途 | 受众 |
+|---|---|---|
+| [ROADSHOW_SUMMARY.md](ROADSHOW_SUMMARY.md) | 投资人路演一页式摘要 | 投资人 / CEO / 合伙人 |
+| [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | 30 分钟现场演示脚本 | 演讲者 / 新人 onboarding |
+| [VERIFICATION_CHECKLIST.md](VERIFICATION_CHECKLIST.md) | 46 项验收 + 10 项生产 Gate | QA / 安全 / 法务 / 全角色签字 |
+
+**团队现状**：代码就绪度已达内测门槛（Phase 1-3 完整 + E2E 验证）。距生产上线缺 4 件事：
+1. 填真凭据（DashScope / 讯飞 / SMS / 极光 / 支付宝）
+2. TURN 服务器 + 网信办备案
+3. 红队测试（100 道医疗陷阱题）
+4. 法务签字（VERIFICATION_CHECKLIST 第九章）
+
 ## v11 增量（第十五轮 · 实时天气 + Phase 1-3 端到端集成测试）
 
 | 模块 | v10 | v11 | 备注 |
