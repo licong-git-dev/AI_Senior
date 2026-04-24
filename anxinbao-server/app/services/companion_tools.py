@@ -55,6 +55,188 @@ def register(tool: ToolDefinition) -> None:
     _REGISTRY[tool.name] = tool
 
 
+# ===== 真实 Handler 实现（Phase 1 LOW-safety 工具）=====
+# 设计原则：
+# - 不抛异常，遇错返回 {"error": "..."}（dispatch 会包装为 ok=False）
+# - 写入 DB 用短事务（with SessionLocal() as db: ... db.commit()）
+# - 日志详细但脱敏（不打印 token、密码等）
+
+
+async def _handler_log_medication_taken(user_id: int, medication_name: str,
+                                        taken_at: Optional[str] = None) -> dict:
+    """老人主动告知今天某药已服 → 写入 MedicationRecord。"""
+    from datetime import datetime as _dt
+    from app.models.database import SessionLocal, Medication, MedicationRecord
+    db = SessionLocal()
+    try:
+        med = db.query(Medication).filter(
+            Medication.user_id == user_id,
+            Medication.name.like(f"%{medication_name}%"),
+        ).first()
+        if not med:
+            return {"error": f"未找到药品 '{medication_name}'，请先在用药管理中添加"}
+
+        when = _dt.fromisoformat(taken_at) if taken_at else _dt.now()
+        record = MedicationRecord(
+            user_id=user_id,
+            medication_id=med.id,
+            scheduled_time=when,
+            taken_time=when,
+            status="taken",
+            notes="由 Companion 工具调用记录",
+        )
+        db.add(record)
+        db.commit()
+        return {"medication": med.name, "logged_at": when.isoformat()}
+    finally:
+        db.close()
+
+
+async def _handler_log_meal(user_id: int, meal_text: str,
+                            meal_time: str = "lunch") -> dict:
+    """老人提到吃了什么 → 写入 MealRecord（不解析营养，仅 notes 字段）。"""
+    from datetime import datetime as _dt
+    from app.models.database import SessionLocal, MealRecord
+    db = SessionLocal()
+    try:
+        record = MealRecord(
+            user_id=user_id,
+            meal_type=meal_time,
+            meal_time=_dt.now(),
+            notes=meal_text[:500],
+        )
+        db.add(record)
+        db.commit()
+        return {"meal_type": meal_time, "text": meal_text[:80]}
+    finally:
+        db.close()
+
+
+async def _handler_log_mood(user_id: int, mood: str,
+                            note: Optional[str] = None) -> dict:
+    """老人倾诉心境 → 写入 MoodRecord + 同步到 MemoryEngine 的 mood 类。"""
+    from datetime import datetime as _dt
+    from app.models.database import SessionLocal, MoodRecord
+    from app.services.memory_engine import (
+        MemoryRecord, MemoryType, MemoryVisibility, get_memory_engine,
+    )
+    db = SessionLocal()
+    try:
+        record = MoodRecord(
+            user_id=user_id,
+            mood_type=mood,
+            intensity=5,  # 默认中等
+            notes=note,
+            recorded_at=_dt.now(),
+        )
+        db.add(record)
+        db.commit()
+    finally:
+        db.close()
+
+    # 同步入长期记忆（mood 类，仅老人可见）
+    get_memory_engine().save(MemoryRecord(
+        user_id=user_id,
+        type=MemoryType.MOOD,
+        content=f"心境: {mood}" + (f" - {note}" if note else ""),
+        keywords=[mood],
+        visibility=MemoryVisibility.SELF_ONLY,
+        importance=0.6,
+    ))
+    return {"mood": mood, "synced_to_memory": True}
+
+
+async def _handler_save_memory(
+    user_id: int,
+    type: str,
+    content: str,
+    keywords: Optional[list] = None,
+    visibility: str = "self_only",
+    importance: float = 0.5,
+) -> dict:
+    """LLM 自决把对话中学到的事实写入长期记忆。"""
+    from app.services.memory_engine import (
+        MemoryRecord, MemoryType, MemoryVisibility, get_memory_engine,
+    )
+    try:
+        mem_type = MemoryType(type)
+        vis = MemoryVisibility(visibility)
+    except ValueError as exc:
+        return {"error": f"无效枚举: {exc}"}
+
+    new_id = get_memory_engine().save(MemoryRecord(
+        user_id=user_id,
+        type=mem_type,
+        content=content[:400],
+        keywords=keywords or [],
+        visibility=vis,
+        importance=max(0.0, min(1.0, importance)),
+    ))
+    return {"memory_id": new_id, "type": type}
+
+
+async def _handler_query_health_trend(user_id: int, metric: str,
+                                      days: int = 7) -> dict:
+    """聚合最近 N 天健康指标，返回简要统计供 Hermes 措辞。"""
+    from datetime import datetime as _dt, timedelta as _td
+    from app.models.database import SessionLocal, HealthRecord
+    metric_map = {
+        "blood_pressure": "blood_pressure",
+        "heart_rate": "heart_rate",
+        "blood_sugar": "blood_sugar",
+        "weight": "weight",
+    }
+    record_type = metric_map.get(metric)
+    if not record_type:
+        return {"error": f"不支持的指标: {metric}"}
+
+    db = SessionLocal()
+    try:
+        cutoff = _dt.now() - _td(days=max(1, min(90, days)))
+        rows = db.query(HealthRecord).filter(
+            HealthRecord.user_id == user_id,
+            HealthRecord.record_type == record_type,
+            HealthRecord.measured_at >= cutoff,
+        ).order_by(HealthRecord.measured_at.desc()).limit(50).all()
+
+        if not rows:
+            return {"metric": metric, "days": days, "count": 0,
+                    "summary": "近期无数据，建议老人主动测量"}
+
+        primary_values = [r.value_primary for r in rows if r.value_primary is not None]
+        avg = round(sum(primary_values) / len(primary_values), 1) if primary_values else None
+        latest = rows[0]
+        return {
+            "metric": metric,
+            "days": days,
+            "count": len(rows),
+            "average_primary": avg,
+            "latest": {
+                "value_primary": latest.value_primary,
+                "value_secondary": latest.value_secondary,
+                "measured_at": latest.measured_at.isoformat() if latest.measured_at else None,
+            },
+        }
+    finally:
+        db.close()
+
+
+# ===== 注册 handler 到对应工具（在 _REGISTRY 填充后调用）=====
+
+def _wire_handlers() -> None:
+    """把 handler 绑定到对应 ToolDefinition；在所有 register(...) 之后调用"""
+    mapping = {
+        "log_medication_taken": _handler_log_medication_taken,
+        "log_meal": _handler_log_meal,
+        "log_mood": _handler_log_mood,
+        "save_memory": _handler_save_memory,
+        "query_health_trend": _handler_query_health_trend,
+    }
+    for name, fn in mapping.items():
+        if name in _REGISTRY:
+            _REGISTRY[name].handler = fn
+
+
 def list_tools() -> List[Dict[str, Any]]:
     """返回 LLM 可消费的工具 schema 列表"""
     return [
@@ -245,3 +427,7 @@ def requires_confirmation(tool_name: str) -> bool:
 def safety_level(tool_name: str) -> Optional[str]:
     tool = _REGISTRY.get(tool_name)
     return tool.safety.value if tool else None
+
+
+# 模块加载完成时绑定 handler（必须放在文件最末尾）
+_wire_handlers()

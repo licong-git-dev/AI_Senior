@@ -8,7 +8,59 @@
 
 ---
 
-## r11 — `<pending>` · 数字生命陪伴 Phase 1 alpha · 完整 4 阶段 RFC 与骨架
+## r12 — `<pending>` · 数字生命陪伴 Phase 1 实施启动（A 选项）
+
+接续 r11 交付的 RFC 与骨架，本轮推进到**实际可用的 Phase 1**。继续受 `COMPANION_ENABLED=true` 门控，不破坏现有任何功能。
+
+### 新增代码
+- **5 个 LOW-safety 工具 handler** ([companion_tools.py](anxinbao-server/app/services/companion_tools.py))：
+  - `log_medication_taken` → `MedicationRecord` 写入
+  - `log_meal` → `MealRecord` 写入
+  - `log_mood` → `MoodRecord` + 同步到 `MemoryEngine.MOOD`
+  - `save_memory` → LLM 自决写入长期记忆
+  - `query_health_trend` → 聚合最近 N 天 `HealthRecord` 并返回统计
+- **MemoryConsolidator** ([memory_consolidator.py](anxinbao-server/app/services/memory_consolidator.py))：对话后**异步**抽取事实/偏好/关系/事件：
+  - LLM 抽取优先（qwen-turbo，~¥0.001/次）
+  - 关键词 fallback（零成本）
+  - 去重（相同 content 或包含关系视为重复）
+  - 限频（单老人 30s 最多触发 1 次）
+  - fire-and-forget 不阻塞 Hermes 主对话
+- **Hermes 真实化** ([hermes.py](anxinbao-server/app/services/agents/hermes.py))：
+  - 5 agent `asyncio.gather` 并行评估（比串行快 ~5x）
+  - Safety Agent critical → 短路返回，绕开 LLM
+  - 调用 LLM 用 `build_system_prompt(AnxinbaoPersona, ctx)` 注入人格
+  - 自动触发 `MemoryConsolidator`
+  - LLM 异常时按方言返回兜底语
+  - 自动推断 `time_of_day`（morning/afternoon/evening/night）
+- **单元测试**（3 个新测试文件，27 个 case）：
+  - [test_companion_persona.py](anxinbao-server/tests/unit/test_companion_persona.py) —— persona frozen + must_not_say + prompt 体积
+  - [test_companion_memory.py](anxinbao-server/tests/unit/test_companion_memory.py) —— CRUD + 用户隔离 + 越权防护 + 召回打分 + 过期过滤
+  - [test_companion_tools.py](anxinbao-server/tests/unit/test_companion_tools.py) —— 注册 + 安全分级 + dispatch
+- **前端 Alpha 预览** ([CompanionPreview.tsx](anxinbao-pwa/src/pages/CompanionPreview.tsx))：
+  - 仅 `?mode=companion-preview` 访问（不经正常路由）
+  - 展示 persona 摘要 + 记忆统计 + 对话窗 + "忘记我吧" 按钮
+  - 后端未启用时显示友好错误提示
+
+### 安全与隔离
+- 默认关闭：`COMPANION_ENABLED=false` → API 返回 503 + 启用指引
+- 生产 OpenAPI 隐藏：即便启用，普通用户不可发现
+- 前端 URL 门控：alpha 页面不加入导航
+- Memory 写入默认 `SELF_ONLY`（家属端绝不可见）
+- LLM 失败所有场景都有兜底，不抛 500
+
+### Phase 1 完成度
+- ✅ Persona 稳定人格
+- ✅ 长期记忆引擎 (SQLite)
+- ✅ Memory Consolidation (LLM + 关键词双路径)
+- ✅ Hermes 使用 persona 与记忆的真实链路
+- ✅ 5 个工具 handler
+- ✅ 27 个单元测试
+- ✅ 前端 alpha 预览
+- 🟡 Phase 2 情境触发器（scheduler 升级）—— 下轮
+- 🟡 Phase 3 完整工具调用 —— 待 Phase 1 内测后
+- 🟡 Phase 4 多 agent 真实编排 —— 待 Phase 3 稳定后
+
+## r11 — [`bdbc38e`](https://github.com/licong-git-dev/AI_Senior/commit/bdbc38e) · 数字生命陪伴 Phase 1 alpha · 完整 4 阶段 RFC 与骨架
 
 🚀 **战略转向**：从"工具型应用" → "AI 数字生命陪伴"。本轮交付完整 4 阶段架构 RFC + Phase 1 骨架 + 风险与成本评估。所有新代码 alpha 状态，由 `COMPANION_ENABLED=true` 显式开启，**不破坏现有 `/api/chat`**。
 

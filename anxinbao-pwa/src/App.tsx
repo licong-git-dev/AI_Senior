@@ -9,6 +9,7 @@ import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import MedicationPage from './pages/MedicationPage';
 import FamilyBindingGuide from './pages/FamilyBindingGuide';
+import CompanionPreview from './pages/CompanionPreview';
 import { getStoredUser } from './lib/api';
 import type { AuthUser } from './lib/api';
 import './index.css';
@@ -147,6 +148,12 @@ function App() {
         onClose={endVideoCall}
       />
     );
+  }
+
+  // Companion Alpha 预览入口：仅当 URL 含 ?mode=companion-preview 时渲染
+  // 不经过正常路由、不在菜单里出现；需后端 COMPANION_ENABLED=true 才能调通
+  if (urlParams.get('mode') === 'companion-preview') {
+    return <CompanionPreview />;
   }
 
   // 子女端 - 健康趋势页面

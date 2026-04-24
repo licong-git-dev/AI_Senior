@@ -29,6 +29,19 @@ from app.services.persona import (
     build_system_prompt,
 )
 
+
+def _infer_time_of_day() -> str:
+    """根据当前时间推断 time_of_day（与 dialect_companion 周期对齐）"""
+    from datetime import datetime as _dt
+    h = _dt.now().hour
+    if 5 <= h < 11:
+        return "morning"
+    if 11 <= h < 18:
+        return "afternoon"
+    if 18 <= h < 22:
+        return "evening"
+    return "night"
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,36 +80,73 @@ class Hermes:
         dialect: str = "wuhan",
     ) -> HermesResponse:
         """
-        老人发来一条消息，Hermes 给出回应。
+        老人发来一条消息，Hermes 给出回应（Phase 1 真实链路）。
 
-        当前实现是骨架：调用所有 agent → 召回记忆 → 构造 prompt →
-        降级到 qwen_service。Phase 4 完成时会替换为完整 LLM + 工具调用循环。
+        流程:
+          1) 并行收集所有 agent 的 report（含 MemoryAgent 的 mood 聚合）
+          2) 召回相关长期记忆（top-K=8，含关键词命中 + 时间衰减）
+          3) 构造 PersonaContext + AnxinbaoPersona system_prompt（≤800 token）
+          4) 调用 LLM 生成回复
+          5) 触发 MemoryConsolidator（fire-and-forget，不阻塞）
+
+        异常时降级：
+          - LLM 失败 → 兜底语 + fallback=True
+          - 记忆引擎失败 → 跳过召回，对话继续（warning 日志）
+          - Agent 失败 → 各 agent 内部已有 safe_evaluate 兜底
         """
-        # 1) 收集所有 agent 的 report
-        ctx_for_agents = {"user_message": user_message}
-        agent_reports: List[AgentReport] = []
-        for agent in (self.health, self.social, self.memory, self.safety, self.schedule):
-            agent_reports.append(await agent.safe_evaluate(user_id, ctx_for_agents))
+        time_of_day = _infer_time_of_day()
 
-        # 2) 召回相关长期记忆
-        memories = self.memory_engine.recall(
-            user_id=user_id,
-            query=user_message,
-            top_k=8,
+        # 1) 并行收集 agent reports（asyncio.gather 比串行快 5x）
+        import asyncio
+        ctx_for_agents = {"user_message": user_message, "time_of_day": time_of_day}
+        agent_reports: List[AgentReport] = await asyncio.gather(
+            self.health.safe_evaluate(user_id, ctx_for_agents),
+            self.social.safe_evaluate(user_id, ctx_for_agents),
+            self.memory.safe_evaluate(user_id, ctx_for_agents),
+            self.safety.safe_evaluate(user_id, ctx_for_agents),
+            self.schedule.safe_evaluate(user_id, ctx_for_agents),
         )
 
-        # 3) 构造 PersonaContext
+        # 安全 agent critical → 短路返回（绕开 LLM）
+        critical_safety = next(
+            (r for r in agent_reports if r.agent_name == "safety" and r.severity == "critical"),
+            None,
+        )
+        if critical_safety:
+            logger.error(f"Hermes 检测到 critical safety event: {critical_safety.summary}")
+            return HermesResponse(
+                text=f"{elder_name}，我察觉到紧急情况，已经通知您家人了。您先深呼吸，我陪着您。",
+                used_memories=[],
+                agent_reports=list(agent_reports),
+                fallback=False,
+            )
+
+        # 2) 召回长期记忆（容错：失败不影响对话）
+        memories = []
+        try:
+            memories = self.memory_engine.recall(
+                user_id=user_id,
+                query=user_message,
+                top_k=8,
+            )
+        except Exception as exc:
+            logger.warning(f"Hermes 召回记忆失败: {exc}（对话继续）")
+
+        # 3) 构造 PersonaContext + system prompt
         ctx = PersonaContext(
             elder_name=elder_name,
             elder_dialect=dialect,
-            elder_mood_recent=self._extract_mood(agent_reports),
-            health_status=self._extract_health(agent_reports),
-            family_status=self._extract_social(agent_reports),
+            elder_mood_recent=self._extract_mood(list(agent_reports)),
+            health_status=self._extract_health(list(agent_reports)),
+            family_status=self._extract_social(list(agent_reports)),
             last_chat_summary=self._format_memories_summary(memories),
+            time_of_day=time_of_day,
         )
         system_prompt = build_system_prompt(ANXINBAO_PERSONA, ctx)
 
-        # 4) 调用 LLM —— 当前骨架降级到现有 qwen_service.chat_async
+        # 4) 调用 LLM（当前用 qwen_service，Phase 3 升级为 function calling）
+        text = ""
+        fallback = False
         try:
             from app.services.qwen_service import qwen_service
             text = await qwen_service.chat_async(
@@ -104,19 +154,35 @@ class Hermes:
                 message=user_message,
                 system_prompt=system_prompt,
             )
-            fallback = True  # 当前还是用旧 qwen 接口，标记为 fallback
+            if not text or not text.strip():
+                fallback = True
+                text = self._fallback_text(elder_name, dialect)
         except Exception as exc:
             logger.exception(f"Hermes.chat 调用 qwen_service 失败: {exc}")
-            text = "唉，我现在脑子有点转不过来，您再说一遍好不？"
             fallback = True
+            text = self._fallback_text(elder_name, dialect)
+
+        # 5) 触发 MemoryConsolidator（fire-and-forget，不阻塞返回）
+        try:
+            from app.services.memory_consolidator import schedule_consolidation
+            schedule_consolidation(user_id, user_message)
+        except Exception as exc:
+            logger.warning(f"Hermes 触发 MemoryConsolidator 失败: {exc}（对话继续）")
 
         return HermesResponse(
             text=text,
             tool_calls=[],  # Phase 3 接入 function calling
             used_memories=[m.id for m in memories if m.id is not None],
-            agent_reports=agent_reports,
+            agent_reports=list(agent_reports),
             fallback=fallback,
         )
+
+    @staticmethod
+    def _fallback_text(elder_name: str, dialect: str) -> str:
+        """LLM 异常时的兜底语，按方言选词"""
+        if dialect == "wuhan":
+            return f"{elder_name}，我刚才走神了一下，您再跟我说一遍好不？"
+        return f"{elder_name}，我刚才有点没听清，您再说一次好吗？"
 
     # ===== 辅助 =====
 

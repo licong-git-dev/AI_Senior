@@ -28,6 +28,18 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v8 增量（第十二轮 · Phase 1 实施启动）
+
+| 模块 | v7 | v8 | 备注 |
+|---|---|---|---|
+| 5 个 LOW-safety 工具 handler | ❌ schema only | 🟢 | MedicationRecord / MealRecord / MoodRecord / Memory / HealthRecord 真实写入 |
+| MemoryConsolidator | ❌ | 🟢 | LLM + 关键词双路径 + 去重 + 限频 |
+| Hermes 真实链路 | 🟡 骨架 | 🟢 | 5-agent 并行 + persona 注入 + 自动 consolidation + safety 短路 |
+| Companion 单元测试 | ❌ | 🟢 | 27 case，含越权防护 + 召回打分 + 过期过滤 |
+| 前端 Companion 预览 | ❌ | 🟢 | `?mode=companion-preview` alpha 入口 |
+
+**Phase 1 就绪度**：骨架 ✅ → 骨肉充实 ✅ → 下一步**端到端集成测试 + 评审**。
+
 ## v7 增量（第十一轮 · 数字生命陪伴 Phase 1 alpha）
 
 ⚠️ 本轮是**战略级新增**而非修复 —— 在不破坏现有任何功能前提下，引入"AI 数字生命"模式作为长期演进方向。
