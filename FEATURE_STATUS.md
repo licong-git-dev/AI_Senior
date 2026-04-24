@@ -28,6 +28,18 @@
 | 子女端视频通话入口 | ✅ | ✅ + 进入前预提醒 | [ChildDashboard.tsx](anxinbao-pwa/src/pages/ChildDashboard.tsx) 顶部视频按钮在 `VITE_TURN_URL` 缺失时弹 confirm，避免老人家属盲目尝试 |
 | 文档 / 开发体验 | — | ✅ | 新增 [Makefile](Makefile)（`make verify` 一行自检）、[MIGRATION_users_api.md](anxinbao-server/docs/MIGRATION_users_api.md)（5 端点 1:1 迁移代码）、[PAYMENT_ALIPAY_SETUP.md](anxinbao-server/docs/PAYMENT_ALIPAY_SETUP.md)（90 分钟跑通沙箱） |
 
+## v11 增量（第十五轮 · 实时天气 + Phase 1-3 端到端集成测试）
+
+| 模块 | v10 | v11 | 备注 |
+|---|---|---|---|
+| WeatherTrigger | 🟡 仅 context 注入 | 🟢 接 wttr.in 实时 | 1h 缓存 + 失败兜底 |
+| weather_service | ❌ | 🟢 | 异步 + 缓存 + 同步包装 |
+| weather 单测 | ❌ | 🟢 | 9 case (解析/缓存/兜底) |
+| Companion E2E 集成测试 | ❌ | 🟢 | 23 case 覆盖 Phase 1-3 全链路 |
+| 集成测试隔离 | ❌ | 🟢 | 临时 SQLite + mock LLM/通知 |
+
+**Phase 1-3 就绪度**：完整链路 E2E 验证通过。距 Phase 4 多 agent 真实编排仅一步之遥（agents 骨架已就绪 r11，未来填充即可）。
+
 ## v10 增量（第十四轮 · Phase 3 工具调用真实化 + Phase 2 推送闭环）
 
 | 模块 | v9 | v10 | 备注 |

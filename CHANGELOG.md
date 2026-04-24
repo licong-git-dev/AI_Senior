@@ -8,7 +8,48 @@
 
 ---
 
-## r14 — `<pending>` · Phase 3 工具调用真实化 + Phase 2 推送闭环（G + H）
+## r15 — `<pending>` · 实时天气接入 + Phase 1-3 端到端集成测试（M + L）
+
+### M：wttr.in 实时天气接入
+- **新增 [`app/services/weather_service.py`](anxinbao-server/app/services/weather_service.py)**：
+  - 异步 wttr.in 客户端（用项目已有 httpx，零新依赖）
+  - 1h 内存缓存（避免对 wttr.in 频繁请求，符合官方限流）
+  - 5 秒 HTTP 超时 + 失败兜底（网络异常返 None，trigger 静默跳过）
+  - 抽取 trigger 关心的 3 个关键信号：`temp_drop` / `heavy_rain` / `heat_wave`
+  - `get_forecast_sync()` 同步包装供 trigger 调用，已有 loop 时跳过避免死锁
+  - 升级路径：换付费 API（和风/心知）只需替换 `_fetch_raw_forecast`，trigger 零修改
+- **WeatherTrigger 升级** ([companion_triggers.py](anxinbao-server/app/services/companion_triggers.py))：
+  - 优先用 context 注入（测试场景）
+  - 无 context 时主动调 `weather_service.get_forecast_sync(city)`
+  - 拉取失败 → 静默跳过（不报警），保持稳定性
+- **9 个 weather 单测** ([test_weather_service.py](anxinbao-server/tests/unit/test_weather_service.py))：
+  - 解析正常 / 高温 / 暴雨 / 数据不足
+  - 缓存命中 / 过期
+  - get_forecast 成功 / 缓存复用 / 网络异常 / 响应异常
+
+### L：Phase 1-3 端到端集成测试
+- **新增 [`tests/integration/test_companion_e2e.py`](anxinbao-server/tests/integration/test_companion_e2e.py)** —— 23 个 e2e case 覆盖完整链路：
+  - **场景 1 · Phase 1**：persona 端点 / chat 5-agent 并行 / memory save+list+stats / forget all
+  - **场景 2 · Phase 2 主动开口**：DND 默认与更新 / run-now 触发评估 / inbox/delivered/ack 流
+  - **场景 3 · Phase 3 工具安全网关**：LOW 直接执行 / MEDIUM 二次确认 / token 单次有效 / unknown tool 404 / pending listing
+  - **场景 4 · 限流**：quota=1 时多次评估只生成 1 条 / DND 关闭后能突破
+  - **场景 5 · COMPANION_ENABLED=false**：所有端点返 503
+- **隔离 fixture `isolated_companion`**：每个测试用临时 SQLite 隔离 memory + proactive，互不污染
+- **mock fixtures**：`mock_qwen` / `mock_notification` 避免真 API 调用，CI 友好
+- 用 FastAPI TestClient 跑全链路，**不启动 uvicorn**
+
+### 验证
+- 4 个新/改文件全部语法 OK
+- weather_service.parse 实测：30°C → 22°C 输出 drop=8 / heat_wave=False ✓
+- e2e 测试可被 `pytest tests/integration/test_companion_e2e.py` 直接运行（CI）
+
+### Phase 进度
+- ✅ Phase 1 (r11-r12) + Phase 2 (r13-r14) + Phase 3 (r14)
+- ✅ **Phase 2 实时天气** (r15) —— Weather trigger 真用上 wttr.in
+- ✅ **Phase 1-3 端到端测试** (r15) —— 23 case 覆盖
+- 🟡 Phase 4 多 agent 真实编排 —— 待团队进入
+
+## r14 — [`f2672c4`](https://github.com/licong-git-dev/AI_Senior/commit/f2672c4) · Phase 3 工具调用真实化 + Phase 2 推送闭环（G + H）
 
 本轮把数字生命推进到"**真能办事** + **真找得到人**"。
 

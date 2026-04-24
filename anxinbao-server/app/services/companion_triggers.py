@@ -288,9 +288,22 @@ class WeatherTrigger(BaseTrigger):
     cooldown_hours = 24
 
     def evaluate(self, user_id: int, context: Dict[str, Any]) -> TriggerEvaluation:
-        # 真实实施：调 wttr.in 或高德天气拿次日预报
-        # 当前骨架：只在 context 提供 weather_forecast 时评估
+        # 优先用 context 注入（测试 / 性能优化场景）
         forecast = context.get("weather_forecast")
+        if not forecast:
+            # 主动拉 wttr.in 实时天气（带 1h 内存缓存）
+            try:
+                from app.services.weather_service import (
+                    DEFAULT_CITY,
+                    get_forecast_sync,
+                )
+                city = context.get("city") or DEFAULT_CITY
+                wf = get_forecast_sync(city)
+                if wf is not None:
+                    forecast = wf.to_trigger_context()
+            except Exception as exc:
+                logger.warning(f"[weather trigger] 拉实时天气失败: {exc}")
+
         if not forecast:
             return TriggerEvaluation(self.name, fired=False, reason="无天气数据")
 
