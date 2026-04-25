@@ -513,6 +513,127 @@ async def list_pending_confirmations(
     return {"items": get_store().list_pending_confirmations(elder_id)}
 
 
+# ===== r26 · Companion Onboarding (Insight #11) =====
+
+
+class OnboardingProfileRequest(BaseModel):
+    family_name: Optional[str] = Field(None, max_length=20, description="老人姓 (张/李)")
+    addressed_as: Optional[str] = Field(None, max_length=20, description="老人称呼 (妈/婆婆)")
+    closest_child_name: Optional[str] = Field(None, max_length=50, description="最亲子女名 (小军)")
+    favorite_tv_show: Optional[str] = Field(None, max_length=100, description="喜欢看的节目")
+    health_focus: Optional[str] = Field(None, max_length=50, description="健康关注点")
+
+
+@router.put("/onboarding/profile")
+async def update_onboarding_profile(
+    body: OnboardingProfileRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """家属注册时填写老人个性化字段（影响 3 句话激活质量）"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+
+    from app.models.database import User
+    user = db.query(User).filter(User.id == elder_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="老人不存在")
+
+    for field_name in ("family_name", "addressed_as", "closest_child_name",
+                       "favorite_tv_show", "health_focus"):
+        v = getattr(body, field_name, None)
+        if v is not None:
+            setattr(user, field_name, v)
+    db.commit()
+    return {
+        "ok": True,
+        "user_id": elder_id,
+        "fields_set": {
+            f: getattr(user, f) for f in
+            ("family_name", "addressed_as", "closest_child_name",
+             "favorite_tv_show", "health_focus")
+        },
+    }
+
+
+@router.get("/onboarding/activation")
+async def get_activation_script(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    拉取 3 句话激活脚本。
+    StandbyScreen 在首次访问时调用。
+    返回 idempotent: is_first_visit 字段告诉前端是否首次。
+    """
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+
+    from app.services.companion_onboarding_service import companion_onboarding_service
+    is_first = not companion_onboarding_service.is_onboarded(db, elder_id)
+
+    # 可选：拿 wttr.in 实时天气作为第 2 句注入
+    weather_desc = None
+    try:
+        from app.services.weather_service import get_forecast_sync, DEFAULT_CITY
+        wf = get_forecast_sync(DEFAULT_CITY)
+        if wf:
+            weather_desc = wf.tomorrow_weather_desc or None
+    except Exception:
+        pass
+
+    script = companion_onboarding_service.generate_activation_script(
+        db, elder_id, weather_desc=weather_desc,
+    )
+    return {
+        "is_first_visit": is_first,
+        "dialect": script.dialect,
+        "estimated_total_seconds": script.estimated_total_seconds,
+        "lines": [script.line_1, script.line_2, script.line_3],
+        "full_text": script.as_full_text(),
+    }
+
+
+@router.post("/onboarding/mark-done")
+async def mark_onboarding_done(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """老人首次激活完成后调用（StandbyScreen 播完 3 句话即触发）"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.companion_onboarding_service import companion_onboarding_service
+    companion_onboarding_service.mark_onboarded(db, elder_id)
+    return {"ok": True}
+
+
+@router.get("/onboarding/followup/{day_offset}")
+async def get_followup(
+    day_offset: int,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    拉取 D1/D3/D7 唤回脚本。
+    day_offset 必须 in [1, 3, 7]，否则 400。
+    已触发过则返 null。
+    """
+    _require_enabled()
+    if day_offset not in (1, 3, 7):
+        raise HTTPException(status_code=400, detail="day_offset 必须是 1, 3, 或 7")
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.companion_onboarding_service import companion_onboarding_service
+    script = companion_onboarding_service.generate_followup(db, elder_id, day_offset)
+    if not script:
+        return {"available": False, "reason": "尚未 onboarded 或本次 day 已触发"}
+    return {
+        "available": True,
+        "day_offset": script.day_offset,
+        "trigger_type": script.trigger_type,
+        "text": script.text,
+    }
+
+
 @router.delete("/confirmations/{confirm_id}")
 async def cancel_confirmation(
     confirm_id: str,

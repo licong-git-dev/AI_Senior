@@ -116,6 +116,19 @@ class User(Base):
     dialect = Column(String(20), default="mandarin")  # 方言偏好
     created_at = Column(DateTime, default=datetime.now)
 
+    # ===== r26 · Insight #11 老人个性化激活字段（前 3 分钟决定一切）=====
+    # 这 6 个字段在注册时由家属代填，决定 onboarding_service 生成的 3 句话能否
+    # "击中"老人。详见 ACTIVATION_FIRST_3_MIN.md。
+    family_name = Column(String(20), nullable=True)        # 老人姓 (张/李/王)
+    addressed_as = Column(String(20), nullable=True)       # 老人喜欢的称呼 (妈/娘/婆婆)
+    closest_child_name = Column(String(50), nullable=True) # 最亲子女名字 (小军)
+    favorite_tv_show = Column(String(100), nullable=True)  # 喜欢的电视节目（含时段）
+    health_focus = Column(String(50), nullable=True)       # 健康关注点 (高血压/糖尿病/...)
+    onboarded_at = Column(DateTime, nullable=True)         # 是否已完成首次激活
+    onboarding_d1_at = Column(DateTime, nullable=True)     # D1 唤回时间（防重复）
+    onboarding_d3_at = Column(DateTime, nullable=True)
+    onboarding_d7_at = Column(DateTime, nullable=True)
+
     # 关系
     conversations = relationship("Conversation", back_populates="user")
     family_members = relationship("FamilyMember", back_populates="user")

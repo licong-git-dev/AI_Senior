@@ -138,6 +138,79 @@ class VoiceMessageService:
         )
         return msg
 
+    # ----- r26 · 推送闭环：把语音通知到家属端 -----
+
+    async def dispatch_to_family(
+        self,
+        db: Session,
+        message_id: int,
+    ) -> dict:
+        """
+        把已存档的语音通过 NotificationService 推给家属。
+        失败已由 r9 的 retry+DLQ 兜底（推送链路）。
+
+        隐私优先：通知正文只放 ai_caption（≤40 字摘要）+ deep link，
+        不放 transcript 全文（避免在通知栏暴露老人原话）。
+        """
+        msg = db.query(ElderVoiceMessage).filter(
+            ElderVoiceMessage.id == message_id
+        ).first()
+        if not msg:
+            raise MessageNotFoundError(f"语音 {message_id} 不存在")
+
+        # 只推一次：标记 delivered_at 避免重复推送
+        if msg.delivered_at is not None:
+            return {"already_dispatched": True, "delivered_at": msg.delivered_at.isoformat()}
+
+        # 拿老人姓名（用于通知标题）
+        elder_name = "妈妈"  # 兜底
+        try:
+            from app.models.database import User
+            elder = db.query(User).filter(User.id == msg.sender_user_id).first()
+            if elder and elder.name:
+                elder_name = elder.name
+        except Exception:
+            pass
+
+        # 摘要（隐私优先：只用 ai_caption，永不暴露 transcript）
+        caption = msg.ai_caption or "刚刚给您留了一段话"
+        if len(caption) > 40:
+            caption = caption[:40] + "…"
+
+        try:
+            from app.services.notification_service import (
+                NotificationTemplate,
+                notification_service,
+            )
+
+            # NotificationTemplate 没有 VOICE_MESSAGE，复用 HEALTH_ALERT 走类似的多通道
+            # （生产应在 NotificationService 加专属 template，本轮先复用）
+            await notification_service.send_notification(
+                user_id=msg.recipient_user_auth_id,
+                template=NotificationTemplate.HEALTH_ALERT,
+                content=f"{elder_name}给您留了一段语音：{caption}",
+                extra_data={
+                    "source": "elder_voice_message",
+                    "voice_message_id": msg.id,
+                    "duration_sec": msg.duration_sec,
+                    "audio_url": msg.audio_url,
+                    "deep_link": f"/voice-message/inbox?focus={msg.id}",
+                },
+            )
+            # 标记 delivered（不管推送下游是否真实送达，至少触发了一次）
+            msg.delivered_at = datetime.now()
+            db.commit()
+            logger.info(
+                f"[voice_message] 语音 {message_id} 已推送给家属 "
+                f"{msg.recipient_user_auth_id}"
+            )
+            return {"dispatched": True, "delivered_at": msg.delivered_at.isoformat()}
+        except Exception as exc:
+            logger.warning(
+                f"[voice_message] 推送语音 {message_id} 异常（DLQ 已兜底）: {exc}"
+            )
+            return {"dispatched": False, "error": str(exc)}
+
     # ----- 异步加工（transcribe + caption）-----
 
     def attach_transcript(

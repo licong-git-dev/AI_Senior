@@ -211,6 +211,20 @@ async def reply_voice(
     return _serialize(msg)
 
 
+@router.post("/{message_id}/dispatch")
+@_handle
+async def dispatch_voice_message(
+    message_id: int,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    把已存档的语音推给家属（r26 推送闭环）。
+    通常在 caption 生成后由后台任务触发；调试时也可手工调。
+    """
+    return await voice_message_service.dispatch_to_family(db, message_id)
+
+
 @router.get("/stats/{elder_user_id}")
 @_handle
 async def stats_for_elder(
