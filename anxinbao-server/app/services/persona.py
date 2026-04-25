@@ -90,6 +90,12 @@ class PersonaContext:
     time_of_day: str = "morning"  # morning / afternoon / evening / night
     season_event: Optional[str] = None  # "中秋将至" / "春节后第三天"
 
+    # ===== U-R3 新增：5 agent 协同字段 =====
+    schedule_today_todo: Optional[List[str]] = None  # ScheduleAgent 输出的今日待办
+    schedule_critical: Optional[List[str]] = None     # ScheduleAgent critical_alerts（如用药超时）
+    safety_special_mode: Optional[str] = None         # SafetyAgent 检测到的特殊模式（hospital/bereavement）
+    memory_health_note: Optional[str] = None          # MemoryAgent 健康度备注（如"缺关系类记忆"）
+
 
 # ===== 全局单例 =====
 
@@ -144,11 +150,26 @@ def build_system_prompt(persona: PersonaConfig, ctx: PersonaContext) -> str:
     if ctx.season_event:
         parts.append(f"- 时节备注：{ctx.season_event}")
 
+    # ===== U-R3 新增：5 agent 上报的"今天该关心什么" =====
+    if ctx.safety_special_mode and ctx.safety_special_mode != "normal":
+        parts.append(f"- ⚠️ 特殊模式：{ctx.safety_special_mode}（请用对应基调说话）")
+    if ctx.schedule_critical:
+        parts.append("- 🚨 紧迫日程：")
+        for item in ctx.schedule_critical[:3]:
+            parts.append(f"  · {item}")
+    if ctx.schedule_today_todo:
+        parts.append("- 📋 今天的事：")
+        for item in ctx.schedule_today_todo[:3]:
+            parts.append(f"  · {item}")
+    if ctx.memory_health_note:
+        parts.append(f"- 💡 记忆备注：{ctx.memory_health_note}（可顺势了解一下）")
+
     parts.append("")
     parts.append("## 输出风格")
     parts.append("- 单次回复 ≤ 80 字，老人耐心有限")
     parts.append("- 优先共情、再问、最后才给建议")
     parts.append("- 涉及健康/用药/紧急 → 走工具调用，不要文字回答")
+    parts.append("- 如果上面提到了'紧迫日程'或'今天的事'，可以自然地提及，但不要强行串联")
 
     return "\n".join(parts)
 

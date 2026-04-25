@@ -107,15 +107,32 @@ class Hermes:
             self.schedule.safe_evaluate(user_id, ctx_for_agents),
         )
 
-        # 安全 agent critical → 短路返回（绕开 LLM）
+        # ===== U-R3 加强：critical 双路径短路 =====
+        # 路径 A: SafetyAgent critical → 紧急安抚语 + 不调 LLM（避免幻觉给出错误指引）
+        # 路径 B: HealthAgent critical → 健康关切语 + 标记 fallback（让客户端知道走的是预设响应）
         critical_safety = next(
-            (r for r in agent_reports if r.agent_name == "safety" and r.severity == "critical"),
+            (r for r in agent_reports
+             if r.agent_name == "safety" and r.severity == "critical"),
             None,
         )
         if critical_safety:
-            logger.error(f"Hermes 检测到 critical safety event: {critical_safety.summary}")
+            logger.error(f"Hermes critical safety: {critical_safety.summary}")
             return HermesResponse(
-                text=f"{elder_name}，我察觉到紧急情况，已经通知您家人了。您先深呼吸，我陪着您。",
+                text=self._safety_critical_text(elder_name, dialect, critical_safety),
+                used_memories=[],
+                agent_reports=list(agent_reports),
+                fallback=False,
+            )
+
+        critical_health = next(
+            (r for r in agent_reports
+             if r.agent_name == "health" and r.severity == "critical"),
+            None,
+        )
+        if critical_health:
+            logger.warning(f"Hermes critical health: {critical_health.summary}")
+            return HermesResponse(
+                text=self._health_critical_text(elder_name, dialect, critical_health),
                 used_memories=[],
                 agent_reports=list(agent_reports),
                 fallback=False,
@@ -132,15 +149,25 @@ class Hermes:
         except Exception as exc:
             logger.warning(f"Hermes 召回记忆失败: {exc}（对话继续）")
 
-        # 3) 构造 PersonaContext + system prompt
+        # 3) 构造 PersonaContext + system prompt（U-R3：注入全部 5 agent 信号）
+        reports_list = list(agent_reports)
+        schedule_details = self._find_details(reports_list, "schedule")
+        safety_details = self._find_details(reports_list, "safety")
+        memory_details = self._find_details(reports_list, "memory")
+
         ctx = PersonaContext(
             elder_name=elder_name,
             elder_dialect=dialect,
-            elder_mood_recent=self._extract_mood(list(agent_reports)),
-            health_status=self._extract_health(list(agent_reports)),
-            family_status=self._extract_social(list(agent_reports)),
+            elder_mood_recent=self._extract_mood(reports_list),
+            health_status=self._extract_health(reports_list),
+            family_status=self._extract_social(reports_list),
             last_chat_summary=self._format_memories_summary(memories),
             time_of_day=time_of_day,
+            # U-R3 新增字段（去 None 防误用）
+            schedule_today_todo=(schedule_details or {}).get("today_todo") or None,
+            schedule_critical=(schedule_details or {}).get("critical_alerts") or None,
+            safety_special_mode=(safety_details or {}).get("mode"),
+            memory_health_note=((memory_details or {}).get("memory_health") or {}).get("note") or None,
         )
         system_prompt = build_system_prompt(ANXINBAO_PERSONA, ctx)
 
@@ -184,6 +211,37 @@ class Hermes:
             return f"{elder_name}，我刚才走神了一下，您再跟我说一遍好不？"
         return f"{elder_name}，我刚才有点没听清，您再说一次好吗？"
 
+    @staticmethod
+    def _safety_critical_text(elder_name: str, dialect: str,
+                               report: AgentReport) -> str:
+        """SafetyAgent critical 短路时的紧急安抚语（不调 LLM 防幻觉）"""
+        # 尽量明确告知"已通知家人"，但**不假报警**——若 details 显示是静默而非真 SOS，
+        # 措辞要克制
+        details = report.details or {}
+        if "hours_silent" in details:
+            # 仅是长时间没说话；用关切语，不假说"已通知"
+            if dialect == "wuhan":
+                return f"{elder_name}，蛮久没听到您声音咯，您现在好不好？我陪着您。"
+            return f"{elder_name}，好久没和我说话了，您现在还好吗？我在这里。"
+        # 真实紧急事件
+        if dialect == "wuhan":
+            return f"{elder_name}，我察觉到紧急情况嘞，家里人那边我已经在通知。您莫怕，我陪您。"
+        return f"{elder_name}，我察觉到紧急情况，已经在通知您家人。您先深呼吸，我陪着您。"
+
+    @staticmethod
+    def _health_critical_text(elder_name: str, dialect: str,
+                               report: AgentReport) -> str:
+        """HealthAgent critical 短路时的健康关切语（不调 LLM 防医疗建议幻觉）"""
+        if dialect == "wuhan":
+            return (
+                f"{elder_name}，您家最近的指标我看了，{report.summary}。"
+                f"莫慌，建议您赶紧打个电话给医生，或者让伢们陪您去看一下。我守着您。"
+            )
+        return (
+            f"{elder_name}，最近的检查指标显示：{report.summary}。"
+            f"建议尽快联系您的医生或家人，我会一直陪着您。"
+        )
+
     # ===== 辅助 =====
 
     @staticmethod
@@ -214,6 +272,14 @@ class Hermes:
         # 拼前 3 条作为"上次聊到"的提示
         items = [f"「{m.content[:40]}」" for m in memories[:3]]
         return "; ".join(items)
+
+    @staticmethod
+    def _find_details(reports: List[AgentReport], agent_name: str) -> Optional[Dict[str, Any]]:
+        """从 reports 找指定 agent 的 details 字典"""
+        for r in reports:
+            if r.agent_name == agent_name:
+                return r.details or {}
+        return None
 
 
 # 全局单例
