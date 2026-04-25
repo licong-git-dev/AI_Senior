@@ -295,6 +295,20 @@ class CompanionPointsService:
         db.add(ledger)
         db.commit()
         db.refresh(ledger)
+
+        # r20 · T 选项：北极星指标埋点（fail-safe）
+        try:
+            from app.core.north_star_metrics import (
+                record_points_earned,
+                record_points_redeemed,
+            )
+            if delta > 0:
+                record_points_earned(type_, amount=delta)
+            else:
+                record_points_redeemed(type_, cost=-delta)
+        except Exception:
+            pass
+
         return ledger
 
     def _count_today(self, db: Session, user_id: int, type_: str) -> int:

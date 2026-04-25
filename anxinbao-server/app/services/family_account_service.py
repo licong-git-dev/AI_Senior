@@ -125,6 +125,14 @@ class FamilyAccountService:
         db.add(member)
         db.commit()
         db.refresh(account)
+
+        # r20 · T 选项：北极星埋点
+        try:
+            from app.core.north_star_metrics import record_family_account_created
+            record_family_account_created()
+        except Exception:
+            pass
+
         logger.info(f"FamilyAccount 创建: id={account.id} creator_user_auth={creator_user_auth_id}")
         return account
 
@@ -274,6 +282,13 @@ class FamilyAccountService:
             # 极端竞态：另一线程刚加入，回滚后查询返回
             db.rollback()
             return self.get_member(db, invite.family_account_id, accepter_user_auth_id)
+
+        # r20 · T 选项：北极星埋点
+        try:
+            from app.core.north_star_metrics import record_family_invite_accepted
+            record_family_invite_accepted(invited_role=invite.invited_role)
+        except Exception:
+            pass
 
         logger.info(
             f"FamilyAccount {invite.family_account_id} 新成员加入: "

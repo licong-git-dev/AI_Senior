@@ -125,6 +125,13 @@ async def companion_chat(
         import logging as _logging
         _logging.getLogger(__name__).warning(f"[points hook] chat earn 异常: {exc}")
 
+    # r20 · T 选项：北极星埋点（老人主动对话事件）
+    try:
+        from app.core.north_star_metrics import record_elder_chat
+        record_elder_chat(dialect=body.dialect or "mandarin")
+    except Exception:
+        pass
+
     return CompanionChatResponse(
         text=resp.text,
         used_memories=resp.used_memories,
@@ -326,6 +333,17 @@ async def acknowledge_proactive(
             related_object_type="proactive_message",
             related_object_id=str(message_id),
         )
+    except Exception:
+        pass
+
+    # r20 · T 选项：北极星埋点
+    try:
+        from app.core.north_star_metrics import record_proactive_acked
+        from app.services.proactive_engagement import get_store as _get_store
+        # 拿 trigger_name 作为标签
+        msg = _get_store().get_message(message_id, elder_id) if hasattr(_get_store(), "get_message") else None
+        trigger_name = getattr(msg, "trigger_name", "unknown") if msg else "unknown"
+        record_proactive_acked(trigger_name)
     except Exception:
         pass
 

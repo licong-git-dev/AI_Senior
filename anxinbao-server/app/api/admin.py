@@ -598,6 +598,31 @@ async def clear_dead_letters(
     return {'success': True, 'cleared_count': cleared}
 
 
+# ===== r20 · 北极星指标看板 =====
+
+
+@router.get("/north-star")
+async def get_north_star_dashboard(admin: dict = Depends(verify_admin)):
+    """
+    北极星指标快照（运营快速验证用）。
+
+    重要：返回的是**进程内累计**，重启清零；生产场景应配合 Prometheus 时间
+    序列。这里只验证埋点是否生效。
+    """
+    from app.core.north_star_metrics import compute_north_star_view
+
+    view = compute_north_star_view()
+
+    # 顺手记录管理员查看动作（审计）
+    admin_service.audit_log.log_action(
+        admin_id=admin["admin_id"],
+        action="view_north_star",
+        resource_type="metrics",
+        resource_id="north_star",
+    )
+    return view
+
+
 @router.post("/system/maintenance")
 async def toggle_maintenance(
     enabled: bool = Query(..., description="是否开启维护模式"),

@@ -500,6 +500,13 @@ async def evaluate_and_send(user_id: int) -> List[ProactiveMessage]:
         if today_count >= quota:
             over_quota = True
 
+        # r20 · T 选项：北极星埋点（生成事件）
+        try:
+            from app.core.north_star_metrics import record_proactive_generated
+            record_proactive_generated(ev.trigger_name)
+        except Exception:
+            pass
+
         # 5) Phase 2 H：真实推送链路（仅当老人开启 push_proactive）
         if dnd.get("push_proactive"):
             await _push_proactive(user_id, msg)
