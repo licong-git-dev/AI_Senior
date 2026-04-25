@@ -163,6 +163,98 @@ class FamilyBindingInvite(Base):
     )
 
 
+# ==================== 家庭账户（r18 · 解决"付费者≠使用者"悖论）====================
+
+
+class FamilyAccount(Base):
+    """
+    家庭账户（计费/订阅的统一主体）
+
+    设计目的（参见 PRODUCT_INSIGHTS.md Insight #1）：
+    - 付费者（子女）和使用者（老人）解耦
+    - 一个家庭账户可有多个家属成员（共同关注同一个老人）
+    - 订阅、套餐、积分等商业资产挂在 FamilyAccount 上，而不是 UserAuth
+
+    一个 FamilyAccount 必须有：
+    - 1 个 beneficiary（受益老人，user_id 指向 users 表）
+    - ≥1 个 payer 角色的 member（付费方）
+    - ≥1 个 caretaker / observer 角色的 member（关怀方，可与 payer 是同一人）
+    """
+    __tablename__ = "family_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_name = Column(String(100), nullable=False, default="未命名家庭")
+    # 受益人：唯一老人；后续可扩展为多老人（如夫妻同住）
+    beneficiary_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    # 主付费人：FamilyAccountMember 中 role=payer 的某一个 user_auth_id
+    primary_payer_user_auth_id = Column(Integer, ForeignKey("user_auth.id"), nullable=True, index=True)
+    status = Column(String(20), default="active", nullable=False)  # active / frozen / archived
+    note = Column(String(500), nullable=True)  # 内部备注（如来源渠道）
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_family_accounts_beneficiary", "beneficiary_user_id"),
+        Index("idx_family_accounts_payer", "primary_payer_user_auth_id"),
+    )
+
+
+class FamilyAccountMember(Base):
+    """
+    家庭账户成员表（多对多：UserAuth ↔ FamilyAccount）
+
+    role 区分：
+    - payer:     可见账单 / 可修改订阅 / 可邀请其他成员（最高权限）
+    - caretaker: 可见日报 / 可关怀互动 / 不可改订阅
+    - observer:  仅可见聚合的安心指数（如远房亲戚）
+
+    permission_level（1-5）作为细粒度补充，未来可用于"特定数据可见性"控制。
+    """
+    __tablename__ = "family_account_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    family_account_id = Column(Integer, ForeignKey("family_accounts.id"), nullable=False, index=True)
+    user_auth_id = Column(Integer, ForeignKey("user_auth.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False, default="caretaker")  # payer / caretaker / observer
+    permission_level = Column(Integer, default=3, nullable=False)
+    invited_by_user_auth_id = Column(Integer, ForeignKey("user_auth.id"), nullable=True)
+    joined_at = Column(DateTime, default=datetime.now, nullable=False)
+
+    __table_args__ = (
+        # 一个 user_auth 只能在同一 family_account 中有一行（避免重复入会）
+        Index("idx_family_members_unique", "family_account_id", "user_auth_id", unique=True),
+        Index("idx_family_members_role", "family_account_id", "role"),
+    )
+
+
+class FamilyAccountInvite(Base):
+    """
+    家庭账户级别的邀请（不同于既有 FamilyBindingInvite —— 后者是老人↔家属绑定）
+
+    邀请链路:
+    1. payer 创建 invite（指定 role + 有效期）
+    2. 邀请码（6-8 位）短信/微信发给被邀请人
+    3. 被邀请人注册/登录后输入邀请码 → 加入 family_account
+    4. consume 后写一行 family_account_members + 标记 invite=used
+    """
+    __tablename__ = "family_account_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invite_code = Column(String(16), unique=True, index=True, nullable=False)
+    family_account_id = Column(Integer, ForeignKey("family_accounts.id"), nullable=False, index=True)
+    invited_role = Column(String(20), nullable=False, default="caretaker")
+    inviter_user_auth_id = Column(Integer, ForeignKey("user_auth.id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime, nullable=True)
+    used_by_user_auth_id = Column(Integer, ForeignKey("user_auth.id"), nullable=True)
+    note = Column(String(200), nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_family_account_invites_active", "family_account_id", "expires_at"),
+    )
+
+
 class Conversation(Base):
     """对话记录表"""
     __tablename__ = "conversations"

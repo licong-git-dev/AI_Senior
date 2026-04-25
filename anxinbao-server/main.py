@@ -64,6 +64,7 @@ from app.api.drug_api import router as drug_api_router
 from app.api.cognitive_api import router as cognitive_api_router
 from app.api.daily_report import router as daily_report_router
 from app.api.companion import router as companion_router  # Alpha · 数字生命陪伴 (Phase 1)
+from app.api.family_account import router as family_account_router  # r18 · 家庭账户
 from app.models.database import init_db, engine
 from app.core.config import get_settings
 from app.core.logging import setup_logging, RequestLoggingMiddleware
@@ -593,6 +594,7 @@ app.include_router(drug_api_router)  # 药品识别模块
 app.include_router(cognitive_api_router)  # 认知训练模块
 app.include_router(daily_report_router)  # 今日爸妈-子女安心日报
 _include_router_safely(companion_router, name="companion")  # Alpha · 数字生命陪伴 (Phase 1)
+app.include_router(family_account_router)  # r18 · 家庭账户（解耦付费者≠使用者）
 
 # 注册监控路由
 app.include_router(create_metrics_endpoint())
