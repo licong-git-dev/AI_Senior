@@ -308,7 +308,7 @@ COMPANION_ENABLED=true pytest tests/integration/test_companion_e2e.py -v --tb=sh
 ### ✅ 6.1 18 份运维文档存在
 ```bash
 find . -name "*.md" -not -path "*/node_modules/*" -not -path "*/.git/*" \
-  -not -path "*/senior/*" -not -path "*/.omc/*" -not -path "*/.specstory/*" \
+  -not -path "*/.omc/*" -not -path "*/.specstory/*" \
   -not -path "*/.claude/*" | wc -l
 # 期望：>= 25 份（含 README / CHANGELOG / FEATURE_STATUS / 各 docs/*.md）
 ```

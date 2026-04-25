@@ -9,7 +9,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 仓库包含两个主应用和一个早期MVP：
 - **anxinbao-pwa/** — React前端（PWA）
 - **anxinbao-server/** — Python FastAPI后端
-- **senior/** — 早期基于Supabase的MVP（独立运行）
 - **prd/**、**Product_plan/**、**Execute_Plan/** — 产品文档、规划和落地执行方案
 
 ## 常用命令

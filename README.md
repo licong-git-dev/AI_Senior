@@ -74,11 +74,9 @@ AI_Senior/
 │   ├── src/pages/        # 10+ 页面（待机屏、对话、健康趋势、子女面板等）
 │   ├── src/lib/api.ts    # 后端 API 客户端
 │   └── public/           # PWA manifest、Service Worker
-├── senior/               # 早期 Supabase MVP（11 个子系统，独立运行）
 ├── prd/                  # 产品需求与竞品分析
 ├── Product_plan/         # 核心卖点精细化、市场分析
 ├── Execute_Plan/         # 5 阶段交付方案、运维手册
-├── 执行计划.md           # 6 阶段开发路线图（含进度）
 ├── CLAUDE.md             # 开发指南（身份模型、限流模式、权限校验）
 └── README.md             # 本文档
 ```
@@ -390,7 +388,6 @@ def _check_elder_access(elder_id, current_user, db):
 | [`prd/`](prd/) | 产品需求规格、竞品分析、功能完成度评估、TODO 清单 |
 | [`Product_plan/`](Product_plan/) | 核心卖点精细化方案、市场创业机会分析 |
 | [`Execute_Plan/`](Execute_Plan/) | 5 阶段交付方案：部署 / 推广 / 运维 / 时间线 / 第一周行动清单 |
-| [`执行计划.md`](执行计划.md) | 6 阶段开发路线图与进度（已完成阶段 1–5） |
 | [`CLAUDE.md`](CLAUDE.md) | 工程指南（身份模型、限流模式、权限校验、测试 Fixtures） |
 
 ---
