@@ -329,6 +329,47 @@ class PointsLedger(Base):
     )
 
 
+# ==================== GMV 商业意图识别（r27 · Insight #13）====================
+
+
+class CommercialIntent(Base):
+    """
+    从老人对话中识别到的"消费意图"。
+
+    设计目的（参见 MONETIZATION_BEYOND_SUBSCRIPTION.md）：
+    第 1 阶段不直接卖商品，先**识别意图 + 标记**。
+    6 个月后看分布，再决定 SKU 上架。
+
+    避免做"AI 推销"——
+    - 老人侧不感知（仅后台标记）
+    - 子女端展示"妈妈最近想要的"卡片，由子女主动决定是否下单
+    - 单条意图有冷却期（同 category 7 天内只标 1 条），防滥用
+    """
+    __tablename__ = "commercial_intents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    intent_type = Column(String(40), nullable=False, index=True)
+    # health_supplement / daily_essential / appliance / service / unclear
+    raw_content = Column(String(500), nullable=False)  # 老人原话片段（≤500 字符）
+    matched_keywords = Column(String(200), nullable=True)
+    confidence = Column(String(10), default="low")  # low / medium / high
+    suggested_sku = Column(String(200), nullable=True)  # 建议品类（不绑定真实商品）
+    suggested_action = Column(String(200), nullable=True)  # "建议子女购买 XX" / "提醒就医"
+    status = Column(String(20), default="new", nullable=False, index=True)
+    # new / viewed_by_family / acted_buy / acted_dismiss / expired
+    family_acted_at = Column(DateTime, nullable=True)
+    family_action_note = Column(String(500), nullable=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_intents_user_type_time", "user_id", "intent_type", "created_at"),
+        Index("idx_intents_user_status", "user_id", "status"),
+    )
+
+
 # ==================== 老人主动留言（r25 · Insight #12 反转推送方向）====================
 
 
@@ -367,6 +408,62 @@ class ElderVoiceMessage(Base):
     __table_args__ = (
         Index("idx_voice_msg_sender_time", "sender_user_id", "created_at"),
         Index("idx_voice_msg_recipient_unread", "recipient_user_auth_id", "read_at"),
+    )
+
+
+# ==================== 商业意图识别（r27 · Insight #13）====================
+
+
+class CommercialIntent(Base):
+    """
+    商业消费意图（GMV 漏斗的"识别层"）
+
+    设计目的（参见 PRODUCT_INSIGHTS_V2.md Insight #13）:
+    - 当前订阅 ARPU < 单户成本，必须破解
+    - 关键不是"立刻做商城"，是先把"识别老人模糊需求"的能力做强
+    - 攒满 6 个月数据后再选 SKU 上架（不要拍脑袋）
+
+    生命周期:
+      detected → reviewed_by_family → ordered/dismissed/expired
+
+    隐私设计：
+    - 老人不直接看见（避免感觉被推销）
+    - 默认仅 family payer 角色可见（payer-only visibility）
+    - 老人可一键关闭整个 GMV 模块
+    """
+    __tablename__ = "commercial_intents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    elder_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    # 识别信息
+    category = Column(String(40), nullable=False, index=True)
+    # 一级分类: nutrition / pain_relief / sleep / mobility / hygiene / hobby / appliance
+    keyword = Column(String(60), nullable=False)         # 命中的关键词
+    source_text = Column(String(500), nullable=True)     # 老人原话（仅前 500 字）
+    source_type = Column(String(20), nullable=False, default="chat")  # chat / proactive_ack / manual
+    source_object_id = Column(String(100), nullable=True)  # 关联 conversation/message id
+
+    # 商业字段（待 r28+ 接通真商城后填）
+    suggested_sku = Column(String(100), nullable=True)   # 推荐 SKU id
+    suggested_title = Column(String(120), nullable=True)
+    suggested_price_cents = Column(Integer, nullable=True)
+    estimated_commission_cents = Column(Integer, nullable=True)
+
+    # 状态机
+    status = Column(String(20), nullable=False, default="detected", index=True)
+    # detected / reviewed_by_family / ordered / dismissed / expired
+    confidence = Column(Float, nullable=False, default=0.5)  # 0-1，模式匹配/LLM 判定置信度
+
+    # 时间戳
+    detected_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by_user_auth_id = Column(Integer, ForeignKey("user_auth.id"), nullable=True)
+    expires_at = Column(DateTime, nullable=True, index=True)  # 30 天后自动过期
+
+    __table_args__ = (
+        Index("idx_intent_elder_status", "elder_user_id", "status"),
+        Index("idx_intent_category_status", "category", "status"),
     )
 
 

@@ -125,6 +125,17 @@ async def companion_chat(
         import logging as _logging
         _logging.getLogger(__name__).warning(f"[points hook] chat earn 异常: {exc}")
 
+    # r27 · 商业意图识别钩子（fire-and-forget，绝不影响对话）
+    try:
+        from app.services.commercial_intent_service import commercial_intent_service
+        commercial_intent_service.detect_and_record(
+            db, elder_id, body.message,
+            source_type="chat",
+        )
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"[intent hook] detect 异常: {exc}")
+
     # r20 · T 选项：北极星埋点（老人主动对话事件）
     try:
         from app.core.north_star_metrics import record_elder_chat

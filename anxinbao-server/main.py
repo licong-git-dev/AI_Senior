@@ -66,6 +66,7 @@ from app.api.daily_report import router as daily_report_router
 from app.api.companion import router as companion_router  # Alpha · 数字生命陪伴 (Phase 1)
 from app.api.family_account import router as family_account_router  # r18 · 家庭账户
 from app.api.voice_message import router as voice_message_router  # r25 · 老人主动语音
+from app.api.commercial_intent import router as commercial_intent_router  # r27 · 商业意图
 from app.models.database import init_db, engine
 from app.core.config import get_settings
 from app.core.logging import setup_logging, RequestLoggingMiddleware
@@ -597,6 +598,7 @@ app.include_router(daily_report_router)  # 今日爸妈-子女安心日报
 _include_router_safely(companion_router, name="companion")  # Alpha · 数字生命陪伴 (Phase 1)
 app.include_router(family_account_router)  # r18 · 家庭账户（解耦付费者≠使用者）
 app.include_router(voice_message_router)  # r25 · 老人主动语音（破子女通知疲劳）
+app.include_router(commercial_intent_router)  # r27 · 商业意图识别（GMV 漏斗）
 
 # 注册监控路由
 app.include_router(create_metrics_endpoint())
