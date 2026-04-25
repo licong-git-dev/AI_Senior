@@ -255,6 +255,67 @@ class FamilyAccountInvite(Base):
     )
 
 
+# ==================== 陪伴值（r19 · Insight #3 留存抓手）====================
+
+
+class CompanionPoints(Base):
+    """
+    陪伴值账户（每个老人一行；不在 family_account 上是因为这是"老人和 AI 的关系"）
+
+    设计目的（参见 PRODUCT_INSIGHTS.md Insight #3）：
+    - D30 留存核心 = 不可逆沉没成本（"重来一次太麻烦"）
+    - 老人对 AI 互动累积陪伴值；可兑换"孙辈视频延长 / 生日彩蛋 / 人生故事解锁"
+    - 关键体验：让老人觉得"换个 AI 等于失去 6 个月攒的陪伴"
+
+    一个 user 一行；balance 反映**当前可用**陪伴值（已扣兑换、已扣过期）。
+    """
+    __tablename__ = "companion_points"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    balance = Column(Integer, nullable=False, default=0)  # 当前余额
+    lifetime_earned = Column(Integer, nullable=False, default=0)  # 累计获得
+    lifetime_spent = Column(Integer, nullable=False, default=0)   # 累计消耗
+    last_earned_at = Column(DateTime, nullable=True)              # 最近一次进账（用于"X 天没攒了"提醒）
+    streak_days = Column(Integer, nullable=False, default=0)      # 连续签到天数
+    last_streak_check_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+
+class PointsLedger(Base):
+    """
+    陪伴值流水（每一笔进出都留痕，不可篡改）
+
+    type:
+    - earn_chat_message:  老人说一句话 +1（每天上限 30 次）
+    - earn_daily_signin:  每天首次互动 +5
+    - earn_save_memory:   教 AI 一个事实 +3
+    - earn_proactive_ack: 接受触发器问候 +2
+    - earn_birthday_bonus: 生日当天额外 +50
+    - spend_extend_videocall: 兑换视频通话延长 -20
+    - spend_birthday_egg:  兑换生日彩蛋 -50
+    - spend_unlock_story:  解锁一段人生故事整理 -30
+    - admin_adjust:        管理员手动调账（运营兜底）
+    """
+    __tablename__ = "points_ledger"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    delta = Column(Integer, nullable=False)  # 正数为进账，负数为消耗
+    type = Column(String(40), nullable=False, index=True)
+    note = Column(String(200), nullable=True)
+    related_object_type = Column(String(40), nullable=True)  # 如 conversation / proactive_message / memory
+    related_object_id = Column(String(100), nullable=True)
+    balance_after = Column(Integer, nullable=False)  # 这笔之后余额（便于审计）
+    created_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_points_ledger_user_time", "user_id", "created_at"),
+        Index("idx_points_ledger_user_type", "user_id", "type"),
+    )
+
+
 class Conversation(Base):
     """对话记录表"""
     __tablename__ = "conversations"

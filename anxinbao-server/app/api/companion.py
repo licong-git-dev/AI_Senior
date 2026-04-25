@@ -90,12 +90,15 @@ async def get_persona():
 async def companion_chat(
     body: CompanionChatRequest,
     current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
-    与数字生命对话（Phase 1 骨架版）
+    与数字生命对话（Phase 1 骨架版 + r19 陪伴值钩子）
 
     当前行为：调用 Hermes，但 Hermes 内部降级到 qwen_service.chat_async。
     Phase 1 完成后会接 LLM + memory recall + tool calling 完整链路。
+
+    r19: 对话成功 → 陪伴值 +1（每天上限 30）；首次对话当天 → +5 签到
     """
     _require_enabled()
     elder_id = _resolve_elder_id(current_user)
@@ -107,6 +110,20 @@ async def companion_chat(
         elder_name=body.elder_name or "您",
         dialect=body.dialect,
     )
+
+    # r19 · 陪伴值钩子（safe_earn 内部已吞限频/异常，不影响对话主路径）
+    try:
+        from app.services.companion_points_service import companion_points_service
+        companion_points_service.daily_signin(db, elder_id)
+        companion_points_service.safe_earn(
+            db, elder_id, "earn_chat_message",
+            related_object_type="chat",
+            note=body.message[:40],
+        )
+    except Exception as exc:
+        # 钩子异常绝不影响对话；只记日志
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"[points hook] chat earn 异常: {exc}")
 
     return CompanionChatResponse(
         text=resp.text,
@@ -287,14 +304,31 @@ async def mark_proactive_delivered(
 async def acknowledge_proactive(
     message_id: int,
     current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """老人回应了主动消息（点击/语音回复）后，标记已确认。用于 NPS 与触发器调优。"""
+    """
+    老人回应了主动消息（点击/语音回复）后，标记已确认。用于 NPS 与触发器调优。
+
+    r19: ack 时陪伴值 +2 (earn_proactive_ack，每天上限 6)
+    """
     _require_enabled()
     elder_id = _resolve_elder_id(current_user)
     from app.services.proactive_engagement import get_store
     ok = get_store().acknowledge(message_id, elder_id)
     if not ok:
         raise HTTPException(status_code=404, detail="消息不存在或无权操作")
+
+    # r19 · 陪伴值钩子
+    try:
+        from app.services.companion_points_service import companion_points_service
+        companion_points_service.safe_earn(
+            db, elder_id, "earn_proactive_ack",
+            related_object_type="proactive_message",
+            related_object_id=str(message_id),
+        )
+    except Exception:
+        pass
+
     return {"ok": True}
 
 
@@ -474,3 +508,123 @@ async def cancel_confirmation(
     if not ok:
         raise HTTPException(status_code=404, detail="confirmation 不存在或已失效")
     return {"ok": True, "cancelled": confirm_id}
+
+
+# ===== r19 · S 选项 · 陪伴值养成系统 =====
+
+
+class RedeemRequest(BaseModel):
+    item_key: str = Field(..., description="兑换码，见 GET /points/catalog")
+    context: Optional[dict] = Field(None, description="约束上下文，如 {is_birthday_today: true}")
+
+
+@router.get("/points/balance")
+async def get_points_balance(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """陪伴值余额 + 累计统计"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.companion_points_service import companion_points_service
+    row = companion_points_service.get_or_create(db, elder_id)
+    return {
+        "balance": row.balance,
+        "lifetime_earned": row.lifetime_earned,
+        "lifetime_spent": row.lifetime_spent,
+        "streak_days": row.streak_days,
+        "last_earned_at": row.last_earned_at.isoformat() if row.last_earned_at else None,
+    }
+
+
+@router.get("/points/ledger")
+async def get_points_ledger(
+    limit: int = 50,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """陪伴值流水（最近 N 条；不可篡改记录）"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.companion_points_service import companion_points_service
+    rows = companion_points_service.list_ledger(db, elder_id, limit=limit)
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "delta": r.delta,
+                "type": r.type,
+                "note": r.note,
+                "balance_after": r.balance_after,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/points/catalog")
+async def get_redemption_catalog():
+    """兑换池 —— 不需鉴权（前端展示）"""
+    _require_enabled()
+    from app.services.companion_points_service import REDEMPTION_CATALOG
+    return {
+        "items": [
+            {
+                "key": k,
+                "title": v["title"],
+                "description": v["description"],
+                "cost": v["cost"],
+                "constraint": v.get("constraint"),
+                "permanent": v.get("permanent", False),
+            }
+            for k, v in REDEMPTION_CATALOG.items()
+        ]
+    }
+
+
+@router.post("/points/redeem")
+async def redeem_points(
+    body: RedeemRequest,
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """老人兑换"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.companion_points_service import (
+        InsufficientBalanceError,
+        RedemptionConstraintViolatedError,
+        UnknownRedemptionError,
+        companion_points_service,
+    )
+    try:
+        ledger = companion_points_service.redeem(
+            db, elder_id, body.item_key, context=body.context
+        )
+    except UnknownRedemptionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except InsufficientBalanceError as e:
+        raise HTTPException(status_code=402, detail=str(e))  # 402 Payment Required（陪伴值不足）
+    except RedemptionConstraintViolatedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return {
+        "ledger_id": ledger.id,
+        "delta": ledger.delta,
+        "balance_after": ledger.balance_after,
+        "item_key": body.item_key,
+    }
+
+
+@router.post("/points/signin")
+async def daily_signin(
+    current_user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """每日首次签到（前端打开时自动触发；重复调用安全）"""
+    _require_enabled()
+    elder_id = _resolve_elder_id(current_user)
+    from app.services.companion_points_service import companion_points_service
+    is_new, streak = companion_points_service.daily_signin(db, elder_id)
+    return {"is_new_signin": is_new, "streak_days": streak}
