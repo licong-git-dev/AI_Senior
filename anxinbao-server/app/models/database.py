@@ -316,6 +316,47 @@ class PointsLedger(Base):
     )
 
 
+# ==================== 老人主动留言（r25 · Insight #12 反转推送方向）====================
+
+
+class ElderVoiceMessage(Base):
+    """
+    老人主动给子女留语音的消息。
+
+    设计目的（参见 PRODUCT_INSIGHTS_V2.md Insight #12）：
+    破解"子女通知疲劳"——把推送方向从"AI 推子女"反转为"老人主动给子女"。
+    妈妈一周只可能录 1-2 条 → 收到时心理价值 = 100x 普通推送。
+
+    数据流:
+    1. 老人对 AI 说想念某个家属 → AI 引导录 30 秒方言语音
+    2. 录音存 audio_url（OSS / 本地）
+    3. AI 自动转写（讯飞 STT）+ 用 qwen 生成 caption（≤40 字）
+    4. 推给收件家属
+    5. 家属端打开 → 标记 read_at
+    6. 家属可一键回语音（reply_voice_message_id 关联）
+    """
+    __tablename__ = "elder_voice_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sender_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)  # 老人
+    recipient_user_auth_id = Column(Integer, ForeignKey("user_auth.id"), nullable=False, index=True)  # 收件家属
+    audio_url = Column(String(500), nullable=False)  # 录音文件位置
+    duration_sec = Column(Integer, nullable=False, default=0)
+    transcript = Column(Text, nullable=True)  # 讯飞 STT 转写原文
+    ai_caption = Column(String(200), nullable=True)  # qwen 生成的"妈妈想说"摘要
+    emotion = Column(String(20), nullable=True)  # happy / lonely / missing 等（MemoryAgent 同口径）
+    delivered_at = Column(DateTime, nullable=True)  # 推送送达
+    read_at = Column(DateTime, nullable=True)  # 家属打开
+    reply_voice_message_id = Column(Integer, ForeignKey("elder_voice_messages.id"), nullable=True)  # 家属语音回复（自引用）
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_voice_msg_sender_time", "sender_user_id", "created_at"),
+        Index("idx_voice_msg_recipient_unread", "recipient_user_auth_id", "read_at"),
+    )
+
+
 class Conversation(Base):
     """对话记录表"""
     __tablename__ = "conversations"
