@@ -10,6 +10,7 @@ import LoginPage from './pages/LoginPage';
 import MedicationPage from './pages/MedicationPage';
 import FamilyBindingGuide from './pages/FamilyBindingGuide';
 import CompanionPreview from './pages/CompanionPreview';
+import OnboardingProfilePage from './pages/OnboardingProfilePage';
 import { getStoredUser } from './lib/api';
 import type { AuthUser } from './lib/api';
 import './index.css';
@@ -154,6 +155,18 @@ function App() {
   // 不经过正常路由、不在菜单里出现；需后端 COMPANION_ENABLED=true 才能调通
   if (urlParams.get('mode') === 'companion-preview') {
     return <CompanionPreview />;
+  }
+
+  // r28 · 老人个性化字段引导（5 字段）。家属登录后 ?onboarding=1 触发。
+  if (urlParams.get('onboarding') === '1') {
+    return (
+      <OnboardingProfilePage
+        onDone={() => {
+          // 完成后清掉 query 参数并刷新到子女主面板
+          window.location.search = '';
+        }}
+      />
+    );
   }
 
   // 子女端 - 健康趋势页面

@@ -19,6 +19,8 @@ import {
   MessageCircle,
   Bookmark,
 } from 'lucide-react';
+import VoiceInbox from '../components/VoiceInbox';
+import IntentCard from '../components/IntentCard';
 import {
   getHealthSummary,
   getDashboardSummary,
@@ -472,6 +474,14 @@ export default function ChildDashboard({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* r28 · 妈妈给您留言 + 妈妈最近想要的东西（仅 payer 可见 IntentCard） */}
+      {parentUserId && (
+        <div className="px-6 -mt-2 mb-2">
+          <VoiceInbox />
+          <IntentCard elderUserId={Number(parentUserId)} />
         </div>
       )}
 

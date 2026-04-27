@@ -702,3 +702,138 @@ export async function getAnxinScoreTrend(elderId: string | number, days = 7): Pr
   if (!response.ok) throw new Error('获取安心指数趋势失败');
   return response.json();
 }
+
+// ===================================================================
+// r28 · Companion 新端点封装（onboarding / voice_message / intent）
+// ===================================================================
+
+export interface OnboardingProfile {
+  family_name?: string;
+  addressed_as?: string;
+  closest_child_name?: string;
+  favorite_tv_show?: string;
+  health_focus?: string;
+}
+
+export async function updateOnboardingProfile(profile: OnboardingProfile): Promise<{
+  ok: boolean;
+  user_id: number;
+  fields_set: Record<string, string | null>;
+}> {
+  const resp = await authFetch(`/api/companion/onboarding/profile`, {
+    method: 'PUT',
+    body: JSON.stringify(profile),
+  });
+  if (!resp.ok) throw new Error('保存老人个性化字段失败');
+  return resp.json();
+}
+
+export async function getActivationScript(): Promise<{
+  is_first_visit: boolean;
+  dialect: string;
+  estimated_total_seconds: number;
+  lines: string[];
+  full_text: string;
+}> {
+  const resp = await authFetch(`/api/companion/onboarding/activation`);
+  if (!resp.ok) throw new Error('获取激活脚本失败');
+  return resp.json();
+}
+
+export async function markOnboardingDone(): Promise<{ ok: boolean }> {
+  const resp = await authFetch(`/api/companion/onboarding/mark-done`, {
+    method: 'POST',
+  });
+  if (!resp.ok) throw new Error('标记 onboarding 完成失败');
+  return resp.json();
+}
+
+// ----- Voice Message -----
+
+export interface VoiceMessage {
+  id: number;
+  sender_user_id: number;
+  recipient_user_auth_id: number;
+  audio_url: string;
+  duration_sec: number;
+  transcript?: string | null;
+  ai_caption?: string | null;
+  emotion?: string | null;
+  created_at: string;
+  delivered_at?: string | null;
+  read_at?: string | null;
+}
+
+export async function recordVoiceMessage(payload: {
+  sender_user_id: number;
+  recipient_user_auth_id: number;
+  audio_url: string;
+  duration_sec: number;
+}): Promise<VoiceMessage> {
+  const resp = await authFetch(`/api/voice-message/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error('录音入库失败');
+  return resp.json();
+}
+
+export async function getVoiceInbox(unreadOnly = false, limit = 30): Promise<{
+  items: VoiceMessage[];
+  total: number;
+}> {
+  const url = `/api/voice-message/inbox?unread_only=${unreadOnly}&limit=${limit}`;
+  const resp = await authFetch(url);
+  if (!resp.ok) throw new Error('拉取语音收件箱失败');
+  return resp.json();
+}
+
+export async function markVoiceRead(messageId: number): Promise<{ ok: boolean }> {
+  const resp = await authFetch(`/api/voice-message/${messageId}/read`, {
+    method: 'POST',
+  });
+  if (!resp.ok) throw new Error('标记语音已读失败');
+  return resp.json();
+}
+
+// ----- Commercial Intent (payer-only) -----
+
+export interface CommercialIntent {
+  id: number;
+  category: string;
+  keyword: string;
+  suggested_title?: string;
+  confidence: number;
+  status: string;
+  detected_at: string;
+  reviewed_at?: string | null;
+  expires_at?: string | null;
+  source_text?: string;
+}
+
+export async function listCommercialIntents(
+  elderUserId: number,
+  status?: string,
+): Promise<{ items: CommercialIntent[] }> {
+  const params = new URLSearchParams({ elder_user_id: String(elderUserId) });
+  if (status) params.set('status', status);
+  const resp = await authFetch(`/api/companion/intents/?${params.toString()}`);
+  if (!resp.ok) throw new Error('拉取商业意图失败');
+  return resp.json();
+}
+
+export async function reviewIntent(intentId: number): Promise<{ id: number; status: string }> {
+  const resp = await authFetch(`/api/companion/intents/${intentId}/review`, {
+    method: 'POST',
+  });
+  if (!resp.ok) throw new Error('标记已查看失败');
+  return resp.json();
+}
+
+export async function dismissIntent(intentId: number): Promise<{ id: number; status: string }> {
+  const resp = await authFetch(`/api/companion/intents/${intentId}/dismiss`, {
+    method: 'POST',
+  });
+  if (!resp.ok) throw new Error('关闭意图失败');
+  return resp.json();
+}

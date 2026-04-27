@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { MessageCircle, Phone, Loader2, Check, X, Pill, Users, Sparkles } from 'lucide-react';
+import { MessageCircle, Phone, Loader2, Check, X, Pill, Users, Sparkles, Mic } from 'lucide-react';
 import { getStoredUser, getMyFamilyGroups, createFamilyGroup, createBindingRequest, getFamilyGroupId, generateProactiveGreeting, triggerSOS } from '../lib/api';
+import ActivationOverlay from '../components/ActivationOverlay';
+import VoiceRecorder from '../components/VoiceRecorder';
 
 interface StandbyScreenProps {
   onWakeUp: () => void;
@@ -23,6 +25,10 @@ export default function StandbyScreen({ onWakeUp, onNavigate }: StandbyScreenPro
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [proactiveGreeting, setProactiveGreeting] = useState<string | null>(null);
+  // r28 · 3 句话激活蒙层（首次访问检测，1s 延迟）
+  const [showActivation, setShowActivation] = useState(false);
+  // r28 · 给家人录语音入口
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   // SOS 长按计时（防止老人误触；按住 1.5 秒才进入确认）
   const [sosHoldProgress, setSosHoldProgress] = useState(0); // 0~100
   const sosHoldTimer = useRef<number | null>(null);
@@ -142,6 +148,12 @@ export default function StandbyScreen({ onWakeUp, onNavigate }: StandbyScreenPro
     if (hour < 22) return { text: '晚上好', sub: '今天过得开心吗' };
     return { text: '夜深了', sub: '早点休息吧' };
   };
+
+  // r28 · 1 秒延迟检测首次访问，触发激活蒙层
+  useEffect(() => {
+    const t = window.setTimeout(() => setShowActivation(true), 1000);
+    return () => window.clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     const user = getStoredUser();
@@ -344,7 +356,35 @@ export default function StandbyScreen({ onWakeUp, onNavigate }: StandbyScreenPro
         >
           <Pill className="w-10 h-10 text-white" />
         </button>
+
+        {/* r28 · 给家人录语音 */}
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowVoiceRecorder(true); }}
+          className="w-20 h-20 bg-pink-500/80 backdrop-blur-sm rounded-3xl flex items-center justify-center hover:bg-pink-500 transition-all active:scale-95"
+          title="给家人录段话"
+        >
+          <Mic className="w-10 h-10 text-white" />
+        </button>
       </div>
+
+      {/* r28 · 3 句话激活蒙层（首次访问） */}
+      {showActivation && <ActivationOverlay onClose={() => setShowActivation(false)} />}
+
+      {/* r28 · 给家人录语音 */}
+      {showVoiceRecorder && (() => {
+        const user = getStoredUser();
+        const elderUid = user?.elder_id || (user?.user_id ? Number(user.user_id) : 0);
+        // 取主家属（如有）作为默认收件人；alpha 阶段沿用 family_id 或 user_id
+        const recipientUaId = user?.family_id ? Number(user.family_id) : Number(user?.user_id || 0);
+        return (
+          <VoiceRecorder
+            senderUserId={elderUid || 0}
+            recipientUserAuthId={recipientUaId}
+            recipientName="家人"
+            onClose={() => setShowVoiceRecorder(false)}
+          />
+        );
+      })()}
 
       {/* SOS 紧急求助按钮：独立位置、放大到 96px、长按 1.5s 触发 */}
       <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center gap-2">
